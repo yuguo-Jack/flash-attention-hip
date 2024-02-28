@@ -27,46 +27,46 @@ template <>
 void FlashRunner::run_<FlashFwdBatchedParams, 64, device_gemm_trait::Float16,
                        true, false>(FlashFwdBatchedParams &params,
                                     hipStream_t &stream) {
-  //if (params.is_dropout) {
-    BOOL_SWITCH(BaseParams::kIsDeterministic, kIsDeterministic, [&] {
+  // if (params.is_dropout) {
+  //   BOOL_SWITCH(BaseParams::kIsDeterministic, kIsDeterministic, [&] {
       this->template run_fwd_<
           FlashFwdBatchedParams, fwd_device_gemm::DeviceGemmBatchedHeadDim64,
           device_gemm_trait::Float16, device_gemm_trait::kGemmSpecPadding,
-          device_gemm_trait::kMaskingSpecDefault, kIsDeterministic>(params,
+          device_gemm_trait::kMaskingSpecDefault, false>(params,
                                                                     stream);
-    });
-  /*} else {
-    BOOL_SWITCH(BaseParams::kIsDeterministic, kIsDeterministic, [&] {
-      this->template run_fwd_<
-          FlashFwdBatchedParams,
-          fwd_device_gemm::DeviceGemmBatchedHeadDim64NonDrop,
-          device_gemm_trait::Float16, device_gemm_trait::kGemmSpecPadding,
-          device_gemm_trait::kMaskingSpecDefault, kIsDeterministic>(params,
-                                                                    stream);
-    });
-  }*/
+  //   });
+  // } else {
+  //   BOOL_SWITCH(BaseParams::kIsDeterministic, kIsDeterministic, [&] {
+  //     this->template run_fwd_<
+  //         FlashFwdBatchedParams,
+  //         fwd_device_gemm::DeviceGemmBatchedHeadDim64NonDrop,
+  //         device_gemm_trait::Float16, device_gemm_trait::kGemmSpecPadding,
+  //         device_gemm_trait::kMaskingSpecDefault, kIsDeterministic>(params,
+  //                                                                   stream);
+  //   });
+  // }
 } // FlashRunner::run_()
 
 template <>
 void FlashRunner::run_<FlashFwdBatchedParams, 64, device_gemm_trait::Float16,
                        false, false>(FlashFwdBatchedParams &params,
                                      hipStream_t &stream) {
-  //if (params.is_dropout) {
-    BOOL_SWITCH(BaseParams::kIsDeterministic, kIsDeterministic, [&] {
+  // if (params.is_dropout) {
+  //   BOOL_SWITCH(BaseParams::kIsDeterministic, kIsDeterministic, [&] {
       this->template run_fwd_<
           FlashFwdBatchedParams, fwd_device_gemm::DeviceGemmBatchedHeadDim64,
           device_gemm_trait::Float16, device_gemm_trait::kGemmSpecDefault,
-          device_gemm_trait::kMaskingSpecDefault, kIsDeterministic>(params,
+          device_gemm_trait::kMaskingSpecDefault, false>(params,
                                                                     stream);
-    });
-  /*} else {
-    BOOL_SWITCH(BaseParams::kIsDeterministic, kIsDeterministic, [&] {
-      this->template run_fwd_<
-          FlashFwdBatchedParams,
-          fwd_device_gemm::DeviceGemmBatchedHeadDim64NonDrop,
-          device_gemm_trait::Float16, device_gemm_trait::kGemmSpecDefault,
-          device_gemm_trait::kMaskingSpecDefault, kIsDeterministic>(params,
-                                                                    stream);
-    });
-  }*/
+  //   });
+  // } else {
+  //   BOOL_SWITCH(BaseParams::kIsDeterministic, kIsDeterministic, [&] {
+  //     this->template run_fwd_<
+  //         FlashFwdBatchedParams,
+  //         fwd_device_gemm::DeviceGemmBatchedHeadDim64NonDrop,
+  //         device_gemm_trait::Float16, device_gemm_trait::kGemmSpecDefault,
+  //         device_gemm_trait::kMaskingSpecDefault, kIsDeterministic>(params,
+  //                                                                   stream);
+  //   });
+  // }
 } // FlashRunner::run_()

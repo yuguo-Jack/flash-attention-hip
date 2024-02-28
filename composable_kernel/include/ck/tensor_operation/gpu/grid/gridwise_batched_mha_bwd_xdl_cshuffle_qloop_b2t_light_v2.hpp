@@ -115,6 +115,15 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
     static constexpr auto I5 = Number<5>{};
     static constexpr auto I6 = Number<6>{};
     static constexpr auto I7 = Number<7>{};
+    static constexpr auto I8 = Number<8>{};
+    static constexpr auto I9 = Number<9>{};
+    static constexpr auto I10 = Number<10>{};
+    static constexpr auto I11 = Number<11>{};
+    static constexpr auto I12 = Number<12>{};
+    static constexpr auto I13 = Number<13>{};
+    static constexpr auto I14 = Number<14>{};
+    static constexpr auto I15 = Number<15>{};
+    static constexpr auto I16 = Number<16>{};
 
     static constexpr auto WaveSize = 64;
     // K1 should be Number<...>
@@ -635,7 +644,7 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
         static constexpr index_t KPack = math::max(math::lcm(AK1, BK1), mfma.k_per_blk);
 
         // Blockwise gemm with transposed XDL output
-        using BlockwiseGemm = BlockwiseGemmXdlops_v2<
+        using BlockwiseGemm = BlockwiseGemmXdlops_v2_dl<
             BlockSize,
             GemmDataType,
             FloatGemmAcc,
@@ -651,6 +660,7 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
             MXdlPerWave,
             NXdlPerWave,
             KPack,
+            Gemm1NPerBlock,
             false,
             KPack * XdlopsGemm<GemmDataType, MPerXdl, NPerXdl, KPack, false>{}.K0PerXdlops,
             KPack>;
@@ -769,7 +779,7 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
         // therefore we may just as well assign Gemm1KPack = group_size
         static constexpr index_t GemmKPack = mfma.group_size;
 
-        using BlockwiseGemm = BlockwiseGemmXdlops_v2<
+        using BlockwiseGemm = BlockwiseGemmXdlops_v2_dl<
             BlockSize,
             GemmDataType,
             FloatGemmAcc,
@@ -785,6 +795,7 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
             NXdlPerWave,
             Gemm1NXdlPerWave,
             GemmKPack,
+            Gemm1NPerBlock,
             true,      // TransposeC
             GemmKPack, // AMmaKStride
             GemmKPack * XdlopsGemm<GemmDataType, MPerXdl, NPerXdl, GemmKPack, false>{}
@@ -967,37 +978,6 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
             1, // DstScalarStrideInVector
             true>;
 
-        __host__ __device__ static constexpr auto MakeBBlockDesc_N0_N1_N2_K0_K1_K2_K3()
-        {
-            const auto N0_ = BSrcBlockDesc_N0_K_N1{}.GetLength(I0);
-            const auto K_  = BSrcBlockDesc_N0_K_N1{}.GetLength(I1);
-            const auto N1_ = BSrcBlockDesc_N0_K_N1{}.GetLength(I2);
-
-            constexpr auto b_block_desc_n_k = transform_tensor_descriptor( //(32, 128)  //(64, 128)
-                BSrcBlockDesc_N0_K_N1{},
-                make_tuple(make_merge_transform_v3_division_mod(
-                               make_tuple(N0_, N1_)),        //(4, 8)     //(8, 8)
-                           make_pass_through_transform(K_)), // 128       // 128
-                make_tuple(Sequence<0, 2>{}, Sequence<1>{}),
-                make_tuple(Sequence<0>{}, Sequence<1>{}));
-
-            return transform_tensor_descriptor(
-                b_block_desc_n_k,
-                make_tuple(
-                    make_unmerge_transform(make_tuple(Gemm2Params::GemmNRepeat,
-                                                      Gemm2Params::GemmNWave,
-                                                      NPerXdl)), //(1, 1, 32)     //(1, 2, 32)
-                    make_unmerge_transform(
-                        make_tuple(Gemm2Params::B_K0,
-                                   Gemm2Params::B_K1,
-                                   Gemm2Params::B_K2,
-                                   Gemm2Params::B_K3))), //(2, 4, 2, 8)   //(2, 4, 2, 8)
-                make_tuple(Sequence<0>{}, Sequence<1>{}),
-                make_tuple(Sequence<0, 1, 2>{}, Sequence<3, 4, 5, 6>{}));
-        }
-
-        static constexpr auto b_block_desc_n0_n1_n2_k0_k1_k2_k3 =
-            MakeBBlockDesc_N0_N1_N2_K0_K1_K2_K3();
 
         using BThreadSlice_N0_N1_N2_K0_K1_K2_K3 =
             Sequence<Gemm2Params::GemmNRepeat, 1, 1, 1, Gemm2Params::B_K1, 1, Gemm2Params::B_K3>;
@@ -1033,23 +1013,12 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
 
         static constexpr auto b_thread_desc_k0_n_k1 = MakeBThreadDesc_K0_N_K1();
 
-        using BBlockwiseCopy =
-            ThreadwiseTensorSliceTransfer_v2<GemmDataType,
-                                             GemmDataType,
-                                             decltype(b_block_desc_n0_n1_n2_k0_k1_k2_k3),
-                                             decltype(b_thread_desc_n0_n1_n2_k0_k1_k2_k3),
-                                             BThreadSlice_N0_N1_N2_K0_K1_K2_K3,
-                                             Sequence<0, 1, 2, 3, 4, 5, 6>,
-                                             6,
-                                             1,
-                                             1,
-                                             true>;
 
         static constexpr auto b_block_slice_copy_step = make_multi_index(0, 0, 0, 1, 0, 0, 0);
         static constexpr auto b_block_reset_copy_step =
             make_multi_index(0, 0, 0, -Gemm2Params::B_K0, 0, 0, 0);
 
-        using BlockwiseGemm = BlockwiseGemmXdlops_v2<
+        using BlockwiseGemm = BlockwiseGemmXdlops_v2_dl<
             BlockSize,
             GemmDataType,
             FloatGemmAcc,
@@ -1065,6 +1034,7 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
             Gemm2Params::GemmMRepeat,
             Gemm2Params::GemmNRepeat,
             Gemm2Params::GemmKPack,
+            Gemm1NPerBlock,
             true, // TransposeC
             Gemm2Params::GemmKPack *
                 XdlopsGemm<GemmDataType, MPerXdl, NPerXdl, Gemm2Params::GemmKPack, false>{}
@@ -1175,7 +1145,7 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
         static constexpr index_t KPack = math::max(math::lcm(AK1, BK1), mfma.k_per_blk);
 
         // Blockwise gemm with transposed XDL output
-        using BlockwiseGemm = BlockwiseGemmXdlops_v2<
+        using BlockwiseGemm = BlockwiseGemmXdlops_v2_dl<
             BlockSize,
             GemmDataType,
             FloatGemmAcc,
@@ -1190,7 +1160,8 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
             NPerXdl,
             MXdlPerWave,
             NXdlPerWave,
-            KPack>;
+            KPack,
+            NPerBlock>;
 
         static constexpr auto a_block_slice_copy_step = make_multi_index(KPerBlock / AK1, 0, 0);
         static constexpr auto b_block_slice_copy_step = make_multi_index(0, 0, 0, KPerBlock);
@@ -1499,7 +1470,7 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
             (SharedMemTrait::d0_block_space_offset + SharedMemTrait::d0_block_space_size_aligned) *
             D0Operator::template TypeTransform<D0DataType>::Size0;
         const index_t c_block_bytes_end =
-            SharedMemTrait::c_block_space_size * sizeof(FloatCShuffle);
+            SharedMemTrait::c_block_space_size * sizeof(OutputDataType);
 
         return math::max(gemm0_bytes_end,
                          gemm1_bytes_end,
@@ -1551,6 +1522,7 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
         const index_t raw_n_padded,
         const index_t block_idx_n)
     {
+
         const FloatGemmAcc p_dropout  = type_convert<FloatGemmAcc>(1.0f - p_drop);
         const FloatGemmAcc rp_dropout = type_convert<FloatGemmAcc>(1.0f / p_dropout);
         const uint8_t p_dropout_in_uint8_t =
@@ -1588,7 +1560,6 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
             __builtin_amdgcn_readfirstlane(block_work_idx_n * NPerBlock);
 
         const index_t num_gemm0_m_block_outer_loop = q_grid_desc_k0_m_k1.GetLength(I1) / MPerBlock;
-        constexpr index_t num_gemm1_k_block_inner_loop = MPerBlock / Gemm1KPerBlock;
 
         // 6 GEMM operations are categorized into 4 buckets. SizeK == SizeO == head_dim
         // dP_MNO Gemm          (Gemm0 rcc)
@@ -1672,8 +1643,6 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
 
         const auto pgrad_gemm_tile_ygrad_block_reset_copy_step =
             make_multi_index(-ygrad_grid_desc_o0_m_o1.GetLength(I0), -MPerBlock, 0);
-
-        constexpr index_t num_ok_block_main_loop = Gemm1NPerBlock / KPerBlock;
 
         //
         // set up S Gemm (type 4 rcc)
@@ -1795,8 +1764,8 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
             static_cast<GemmDataType*>(p_shared) + SharedMemTrait::a2_block_space_offset,
             Gemm2::a_block_desc_k0_m_k1.GetElementSpaceSize());
 
-        auto gemm2_b_thread_buf = make_static_buffer<AddressSpaceEnum::Vgpr, GemmDataType>(
-            Gemm2::b_thread_desc_n0_n1_n2_k0_k1_k2_k3.GetElementSpaceSize());
+        // auto gemm2_b_thread_buf = make_static_buffer<AddressSpaceEnum::Vgpr, GemmDataType>(
+        //     Gemm2::b_thread_desc_n0_n1_n2_k0_k1_k2_k3.GetElementSpaceSize());
 
         // dQ: A matrix VGPR-to-LDS blockwise copy
         auto qgrad_gemm_tile_sgrad_thread_copy_vgpr_to_lds =
@@ -1810,17 +1779,6 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
         qgrad_blockwise_gemm.SetBBlockStartWindow(make_tuple(0, 0, 0, 0));
 
         auto k_thread_origin = qgrad_blockwise_gemm.CalculateBThreadOriginDataIndex();
-
-        // dQ: B matrix LDS-to-VGPR blockwise copy
-        auto qgrad_gemm_tile_k_blockwise_copy = typename Gemm2::BBlockwiseCopy{
-            Gemm2::b_block_desc_n0_n1_n2_k0_k1_k2_k3,
-            make_multi_index(0,                                            // nrepeat
-                             k_thread_origin[I1],                          // nwave
-                             k_thread_origin[I2],                          // nperxdl
-                             0,                                            // k0
-                             0,                                            // k1
-                             k_thread_origin[I3] / Gemm2Params::GemmKPack, // k2
-                             0)};                                          // k3
 
         auto qgrad_thread_buf = qgrad_blockwise_gemm.GetCThreadBuffer();
 
@@ -2118,40 +2076,29 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
                 s_gemm_tile_q_blockwise_copy.RunWrite(Gemm3::a_block_desc_ak0_m_ak1,
                                                       gemm3_a_block_buf);
 
-                // main body
-                if constexpr(HasMainKBlockLoop)
-                {
-                    index_t i = 0;
+                s_gemm_tile_q_blockwise_copy.RunRead(q_grid_desc_k0_m_k1, q_grid_buf);
 
-                    do
-                    {
-                        s_gemm_tile_q_blockwise_copy.RunRead(q_grid_desc_k0_m_k1, q_grid_buf);
+                block_sync_lds();
+                float *cbuf= &(s_slash_p_thread_buf.GetVectorTypeReference(I0).template AsType<float>()(I0));
+                s_blockwise_gemm.Run_ds(gemm3_a_block_buf.p_data_, k_block_buf.p_data_, cbuf);
 
-                        block_sync_lds();
+                s_blockwise_gemm.MoveBBlockSrcSliceWindow(Gemm3::b_block_slice_copy_step);
 
-                        s_blockwise_gemm.Run(gemm3_a_block_buf, k_block_buf, s_slash_p_thread_buf);
+                block_sync_lds();
 
-                        s_blockwise_gemm.MoveBBlockSrcSliceWindow(Gemm3::b_block_slice_copy_step);
+                s_gemm_tile_q_blockwise_copy.MoveSrcSliceWindow(
+                    q_grid_desc_k0_m_k1, Gemm3::a_block_slice_copy_step);
 
-                        block_sync_lds();
+                s_gemm_tile_q_blockwise_copy.RunWrite(Gemm3::a_block_desc_ak0_m_ak1,
+                                                        gemm3_a_block_buf);
 
-                        s_gemm_tile_q_blockwise_copy.MoveSrcSliceWindow(
-                            q_grid_desc_k0_m_k1, Gemm3::a_block_slice_copy_step);
 
-                        s_gemm_tile_q_blockwise_copy.RunWrite(Gemm3::a_block_desc_ak0_m_ak1,
-                                                              gemm3_a_block_buf);
 
-                        ++i;
-                    } while(i < (num_ok_block_main_loop - 1));
-                }
-                // tail
-                {
-                    block_sync_lds();
+                block_sync_lds();
 
-                    s_blockwise_gemm.Run(gemm3_a_block_buf, k_block_buf, s_slash_p_thread_buf);
+                s_blockwise_gemm.Run_ds(gemm3_a_block_buf.p_data_, k_block_buf.p_data_+8256, cbuf);
 
-                    s_blockwise_gemm.MoveBBlockSrcSliceWindow(Gemm3::b_block_slice_copy_step);
-                }
+                s_blockwise_gemm.MoveBBlockSrcSliceWindow(Gemm3::b_block_slice_copy_step);
             } // end gemm S
 
             // 8d thread_desc in thread scope
@@ -2211,58 +2158,6 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
             }
 
             block_sync_lds(); // wait for lds read in gemm0 blockwise gemm
-
-            // add bias
-            if constexpr(!is_same<D0DataType, void>::value)
-            {
-                if(p_d0_grid != nullptr)
-                {
-                    static constexpr auto& c_thread_desc = s_blockwise_gemm.GetCThreadDesc();
-
-                    const auto d0_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
-                        p_d0_grid, d0_grid_desc_m0_n0_m1_m2_n1_m3.GetElementSpaceSize());
-
-                    auto d0_block_buf = make_dynamic_buffer<AddressSpaceEnum::Lds>(
-                        static_cast<D0DataType*>(p_shared) + SharedMemTrait::d0_block_space_offset,
-                        D0Operator::d0_block_dst_desc_m0_n0_m1_m2_n1_m3.GetElementSpaceSize());
-
-                    auto d0_thread_buf = make_static_buffer<AddressSpaceEnum::Vgpr, D0DataType>(
-                        D0Operator::d0_thread_desc_.GetElementSpaceSize());
-
-                    static_for<0, D0M0, 1>{}([&](auto mr) {
-                        // load data to lds
-                        d0_block_copy_global_to_lds.RunRead(d0_grid_desc_m0_n0_m1_m2_n1_m3,
-                                                            d0_grid_buf);
-
-                        d0_block_copy_global_to_lds.MoveSrcSliceWindow(
-                            d0_grid_desc_m0_n0_m1_m2_n1_m3, make_multi_index(0, 0, 1, 0, 0, 0));
-
-                        d0_block_copy_global_to_lds.RunWrite(
-                            D0Operator::d0_block_dst_desc_m0_n0_m1_m2_n1_m3, d0_block_buf);
-                        block_sync_lds();
-                        // read data form lds
-                        d0_thread_copy_lds_to_vgpr.Run(D0Operator::d0_block_src_desc_n0_n1_m0_m1_m2,
-                                                       make_tuple(I0, I0, I0, I0, I0),
-                                                       d0_block_buf,
-                                                       D0Operator::d0_thread_desc_,
-                                                       make_tuple(I0, I0, I0, I0, I0),
-                                                       d0_thread_buf);
-
-                        // bias add
-                        static_for<0, d0_thread_buf.Size(), 1>{}([&](auto i) {
-                            constexpr index_t c_offset =
-                                c_thread_desc.CalculateOffset(make_tuple(mr, I0, i));
-
-                            s_slash_p_thread_buf(Number<c_offset>{}) +=
-                                ck::type_convert<FloatGemmAcc>(d0_thread_buf[i]);
-                        });
-                    });
-
-                    d0_block_copy_global_to_lds.MoveSrcSliceWindow(
-                        d0_grid_desc_m0_n0_m1_m2_n1_m3,
-                        make_multi_index(-1, 0, -D0M0.value, 0, 0, 0));
-                }
-            }
 
             // P_i: = softmax(scalar * S_i:)
             // scaling is already performed in the preceding statements with s_element_op
@@ -2355,49 +2250,37 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
 
                 vgrad_gemm_tile_ygrad_blockwise_copy.RunWrite(Gemm1::b_block_desc_bk0_n_bk1,
                                                               gemm1_b_block_buf);
+                vgrad_gemm_tile_p_blockwise_copy.Run(Gemm1::a_src_thread_desc_k0_m_k1,
+                                                        Gemm1::a_block_slice_copy_step * I0,
+                                                        s_slash_p_thread_buf,
+                                                        Gemm1::a_thread_desc_k0_m_k1,
+                                                        make_tuple(I0, I0, I0),
+                                                        gemm1_a_thread_buf);
+                vgrad_gemm_tile_ygrad_blockwise_copy.RunRead(ygrad_grid_desc_m0_o_m1,
+                                                                ygrad_grid_buf);
 
-                // main body
-                if constexpr(num_gemm1_k_block_inner_loop > 1)
-                {
-                    static_for<0, num_gemm1_k_block_inner_loop - 1, 1>{}([&](auto i) {
-                        vgrad_gemm_tile_p_blockwise_copy.Run(Gemm1::a_src_thread_desc_k0_m_k1,
-                                                             Gemm1::a_block_slice_copy_step * i,
-                                                             s_slash_p_thread_buf,
-                                                             Gemm1::a_thread_desc_k0_m_k1,
-                                                             make_tuple(I0, I0, I0),
-                                                             gemm1_a_thread_buf);
-                        vgrad_gemm_tile_ygrad_blockwise_copy.RunRead(ygrad_grid_desc_m0_o_m1,
-                                                                     ygrad_grid_buf);
+                block_sync_lds();
+                float *cbuf= &(vgrad_thread_buf.GetVectorTypeReference(I0).template AsType<float>()(I0));
+                vgrad_blockwise_gemm.Run_dv_dk(&gemm1_a_thread_buf(I0), gemm1_b_block_buf.p_data_, cbuf);
 
-                        block_sync_lds();
+                block_sync_lds();
 
-                        vgrad_blockwise_gemm.Run(
-                            gemm1_a_thread_buf, gemm1_b_block_buf, vgrad_thread_buf);
+                vgrad_gemm_tile_ygrad_blockwise_copy.MoveSrcSliceWindow(
+                    ygrad_grid_desc_m0_o_m1, Gemm1::b_block_slice_copy_step);
 
-                        block_sync_lds();
+                vgrad_gemm_tile_ygrad_blockwise_copy.RunWrite(Gemm1::b_block_desc_bk0_n_bk1,
+                                                                gemm1_b_block_buf);
 
-                        vgrad_gemm_tile_ygrad_blockwise_copy.MoveSrcSliceWindow(
-                            ygrad_grid_desc_m0_o_m1, Gemm1::b_block_slice_copy_step);
+                vgrad_gemm_tile_p_blockwise_copy.Run(
+                    Gemm1::a_src_thread_desc_k0_m_k1,
+                    Gemm1::a_block_slice_copy_step * I1,
+                    s_slash_p_thread_buf,
+                    Gemm1::a_thread_desc_k0_m_k1,
+                    make_tuple(I0, I0, I0),
+                    gemm1_a_thread_buf);
 
-                        vgrad_gemm_tile_ygrad_blockwise_copy.RunWrite(Gemm1::b_block_desc_bk0_n_bk1,
-                                                                      gemm1_b_block_buf);
-                    });
-                }
-                // tail
-                {
-                    vgrad_gemm_tile_p_blockwise_copy.Run(
-                        Gemm1::a_src_thread_desc_k0_m_k1,
-                        Gemm1::a_block_slice_copy_step * Number<num_gemm1_k_block_inner_loop - 1>{},
-                        s_slash_p_thread_buf,
-                        Gemm1::a_thread_desc_k0_m_k1,
-                        make_tuple(I0, I0, I0),
-                        gemm1_a_thread_buf);
-
-                    block_sync_lds();
-
-                    vgrad_blockwise_gemm.Run(
-                        gemm1_a_thread_buf, gemm1_b_block_buf, vgrad_thread_buf);
-                }
+                block_sync_lds();
+                vgrad_blockwise_gemm.Run_dv_dk(&gemm1_a_thread_buf(I0), gemm1_b_block_buf.p_data_, cbuf);
             } // end gemm dV
 
             // gemm dP
@@ -2419,35 +2302,25 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
                 pgrad_gemm_tile_ygrad_blockwise_copy.RunWrite(Gemm0::a_block_desc_ak0_m_ak1,
                                                               gemm0_a_block_buf);
 
-                // main body
-                if constexpr(num_ok_block_main_loop > 1)
-                {
-                    static_for<0, num_ok_block_main_loop - 1, 1>{}([&](auto i) {
-                        pgrad_gemm_tile_ygrad_blockwise_copy.RunRead(ygrad_grid_desc_o0_m_o1,
-                                                                     ygrad_grid_buf);
+                pgrad_gemm_tile_ygrad_blockwise_copy.RunRead(ygrad_grid_desc_o0_m_o1,
+                                                                ygrad_grid_buf);
 
-                        block_sync_lds();
+                block_sync_lds();
+                float *cbuf= &(pgrad_thread_buf.GetVectorTypeReference(I0).template AsType<float>()(I0));
+                pgrad_blockwise_gemm.Run_dp(gemm0_a_block_buf.p_data_, &v_thread_buf(I0)(I0), cbuf);
 
-                        pgrad_blockwise_gemm.Run(
-                            gemm0_a_block_buf, v_thread_buf(Number<i>{}), pgrad_thread_buf);
+                block_sync_lds();
 
-                        block_sync_lds();
+                pgrad_gemm_tile_ygrad_blockwise_copy.MoveSrcSliceWindow(
+                    ygrad_grid_desc_o0_m_o1, Gemm0::a_block_slice_copy_step);
 
-                        pgrad_gemm_tile_ygrad_blockwise_copy.MoveSrcSliceWindow(
-                            ygrad_grid_desc_o0_m_o1, Gemm0::a_block_slice_copy_step);
+                pgrad_gemm_tile_ygrad_blockwise_copy.RunWrite(Gemm0::a_block_desc_ak0_m_ak1,
+                                                                gemm0_a_block_buf);
 
-                        pgrad_gemm_tile_ygrad_blockwise_copy.RunWrite(Gemm0::a_block_desc_ak0_m_ak1,
-                                                                      gemm0_a_block_buf);
-                    });
-                }
-                // tail
-                {
-                    block_sync_lds();
+                block_sync_lds();
 
-                    pgrad_blockwise_gemm.Run(gemm0_a_block_buf,
-                                             v_thread_buf(Number<num_ok_block_main_loop - 1>{}),
-                                             pgrad_thread_buf);
-                }
+                pgrad_blockwise_gemm.Run_dp(gemm0_a_block_buf.p_data_,&v_thread_buf(I1)(I0),cbuf);
+
             } // end gemm dP
 
             // dS = P * (dP - Y_dot_dY)
@@ -2468,61 +2341,17 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
                                     : y_dot_ygrad_thread_buf[Number<m>{}]);
             });
 
-            // output bias grad
-            if constexpr(!is_same<D0DataType, void>::value)
-            {
-                if(p_d0grad_grid != nullptr)
-                {
-                    auto d0grad_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
-                        p_d0grad_grid, d0grad_grid_desc_m0_n0_m1_m2_n1_m3.GetElementSpaceSize());
-
-                    auto d0grad_block_buf = make_dynamic_buffer<AddressSpaceEnum::Lds>(
-                        static_cast<D0DataType*>(p_shared) + SharedMemTrait::d0_block_space_offset,
-                        D0Operator::d0grad_block_src_desc_m0_n0_m1_m2_n1_m3.GetElementSpaceSize());
-
-                    static_for<0, D0M0, 1>{}([&](auto mr) {
-                        d0grad_thread_copy_vgpr_to_lds.Run(
-                            D0Operator::d0_thread_desc_,
-                            make_tuple(mr, I0, I0, I0, I0),
-                            sgrad_thread_buf,
-                            D0Operator::d0_block_src_desc_n0_n1_m0_m1_m2,
-                            d0grad_block_buf);
-
-                        block_sync_lds();
-
-                        // write data from lds to global
-                        d0grad_block_copy_lds_to_global.Run(
-                            D0Operator::d0grad_block_src_desc_m0_n0_m1_m2_n1_m3,
-                            d0grad_block_buf,
-                            d0grad_grid_desc_m0_n0_m1_m2_n1_m3,
-                            d0grad_grid_buf,
-                            I0);
-
-                        d0grad_block_copy_lds_to_global.MoveDstSliceWindow(
-                            d0grad_grid_desc_m0_n0_m1_m2_n1_m3, make_multi_index(0, 0, 1, 0, 0, 0));
-                    });
-
-                    d0grad_block_copy_lds_to_global.MoveDstSliceWindow(
-                        d0grad_grid_desc_m0_n0_m1_m2_n1_m3,
-                        make_multi_index(-1, 0, -D0M0.value, 0, 0, 0));
-                }
-            }
-
             SubThreadBlock<BlockSize> gemm2_a_copy_subgroup(s_blockwise_gemm.GetWaveIdx()[I0],
                                                             s_blockwise_gemm.GetWaveIdx()[I1]);
-
-            constexpr index_t num_gemm2_loop = NPerBlock / Gemm2Params::Sum_K;
-            static_assert(Gemm2::ASrcBlockSliceWindowIterator::GetNumOfAccess() == num_gemm2_loop,
-                          "");
 
             // TODO: tune gemm2 pipeline
             // gemm dQ
             // dQ = scalar * dS * K
-            qgrad_thread_buf.Clear();
-            static_for<0, num_gemm2_loop, 1>{}([&](auto gemm2_loop_idx) { // gemm dQ
+            {
+                qgrad_thread_buf.Clear();
                 // load QGrad Gemm A
                 const auto sgrad_slice_idx =
-                    Gemm2::ASrcBlockSliceWindowIterator::GetIndexTupleOfNumber(gemm2_loop_idx);
+                    Gemm2::ASrcBlockSliceWindowIterator::GetIndexTupleOfNumber(I0);
                 constexpr auto mwave_range = make_tuple(
                     sgrad_slice_idx[I2],
                     sgrad_slice_idx[I2] + Gemm2Params::ABlockSliceLengths_M0_K0_M1_K1::At(I2));
@@ -2542,24 +2371,19 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
                         gemm2_a_block_buf);
                 }
 
-                qgrad_gemm_tile_k_blockwise_copy.Run(Gemm2::b_block_desc_n0_n1_n2_k0_k1_k2_k3,
-                                                     k_block_buf,
-                                                     Gemm2::b_thread_desc_n0_n1_n2_k0_k1_k2_k3,
-                                                     make_tuple(I0, I0, I0, I0, I0, I0, I0),
-                                                     gemm2_b_thread_buf);
-
-                qgrad_gemm_tile_k_blockwise_copy.MoveSrcSliceWindow(
-                    Gemm2::b_block_desc_n0_n1_n2_k0_k1_k2_k3, Gemm2::b_block_slice_copy_step);
 
                 block_sync_lds(); // sync before read
-                qgrad_blockwise_gemm.Run(gemm2_a_block_buf, gemm2_b_thread_buf, qgrad_thread_buf);
-            }); // end gemm dQ
-            // atomic_add dQ
-            qgrad_thread_copy_vgpr_to_global.Run(Gemm2::c_thread_desc_m0_n0_m1_n1_m2_n2_n3_n4,
-                                                 make_tuple(I0, I0, I0, I0, I0, I0, I0, I0),
-                                                 qgrad_thread_buf,
-                                                 qgrad_grid_desc_m0_o0_m1_o1_m2_o2_o3_o4,
-                                                 qgrad_grid_buf);
+                float *cbuf= &(qgrad_thread_buf.GetVectorTypeReference(I0).template AsType<float>()(I0));
+                qgrad_blockwise_gemm.Run_dq(gemm2_a_block_buf.p_data_, k_block_buf.p_data_, cbuf);
+
+                // end gemm dQ
+                // atomic_add dQ
+                qgrad_thread_copy_vgpr_to_global.Run(Gemm2::c_thread_desc_m0_n0_m1_n1_m2_n2_n3_n4,
+                                                    make_tuple(I0, I0, I0, I0, I0, I0, I0, I0),
+                                                    qgrad_thread_buf,
+                                                    qgrad_grid_desc_m0_o0_m1_o1_m2_o2_o3_o4,
+                                                    qgrad_grid_buf);
+            }//end dQ
 
             // gemm dK
             // dK = scalar * dS^T * Q
@@ -2582,47 +2406,36 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
                 kgrad_gemm_tile_q_blockwise_copy.RunWrite(Gemm1::b_block_desc_bk0_n_bk1,
                                                           gemm1_b_block_buf);
 
-                // main body
-                if constexpr(num_gemm1_k_block_inner_loop > 1)
-                {
-                    static_for<0, num_gemm1_k_block_inner_loop - 1, 1>{}([&](auto i) {
-                        kgrad_gemm_tile_sgrad_blockwise_copy.Run(Gemm1::a_src_thread_desc_k0_m_k1,
-                                                                 Gemm1::a_block_slice_copy_step * i,
-                                                                 sgrad_thread_buf,
-                                                                 Gemm1::a_thread_desc_k0_m_k1,
-                                                                 make_tuple(I0, I0, I0),
-                                                                 gemm1_a_thread_buf);
-                        kgrad_gemm_tile_q_blockwise_copy.RunRead(q_grid_desc_m0_k_m1, q_grid_buf);
+                kgrad_gemm_tile_sgrad_blockwise_copy.Run(Gemm1::a_src_thread_desc_k0_m_k1,
+                                                            Gemm1::a_block_slice_copy_step * I0,
+                                                            sgrad_thread_buf,
+                                                            Gemm1::a_thread_desc_k0_m_k1,
+                                                            make_tuple(I0, I0, I0),
+                                                            gemm1_a_thread_buf);
+                kgrad_gemm_tile_q_blockwise_copy.RunRead(q_grid_desc_m0_k_m1, q_grid_buf);
 
-                        block_sync_lds();
+                block_sync_lds();
+                float *cbuf= &(kgrad_thread_buf.GetVectorTypeReference(I0).template AsType<float>()(I0));
+                vgrad_blockwise_gemm.Run_dv_dk(&gemm1_a_thread_buf(I0), gemm1_b_block_buf.p_data_, cbuf);
 
-                        kgrad_blockwise_gemm.Run(
-                            gemm1_a_thread_buf, gemm1_b_block_buf, kgrad_thread_buf);
+                block_sync_lds();
 
-                        block_sync_lds();
+                kgrad_gemm_tile_q_blockwise_copy.MoveSrcSliceWindow(
+                    q_grid_desc_m0_k_m1, Gemm1::b_block_slice_copy_step);
 
-                        kgrad_gemm_tile_q_blockwise_copy.MoveSrcSliceWindow(
-                            q_grid_desc_m0_k_m1, Gemm1::b_block_slice_copy_step);
+                kgrad_gemm_tile_q_blockwise_copy.RunWrite(Gemm1::b_block_desc_bk0_n_bk1,
+                                                            gemm1_b_block_buf);
 
-                        kgrad_gemm_tile_q_blockwise_copy.RunWrite(Gemm1::b_block_desc_bk0_n_bk1,
-                                                                  gemm1_b_block_buf);
-                    });
-                }
-                // tail
-                {
-                    kgrad_gemm_tile_sgrad_blockwise_copy.Run(
-                        Gemm1::a_src_thread_desc_k0_m_k1,
-                        Gemm1::a_block_slice_copy_step * Number<num_gemm1_k_block_inner_loop - 1>{},
-                        sgrad_thread_buf,
-                        Gemm1::a_thread_desc_k0_m_k1,
-                        make_tuple(I0, I0, I0),
-                        gemm1_a_thread_buf);
+                kgrad_gemm_tile_sgrad_blockwise_copy.Run(
+                    Gemm1::a_src_thread_desc_k0_m_k1,
+                    Gemm1::a_block_slice_copy_step * I1,
+                    sgrad_thread_buf,
+                    Gemm1::a_thread_desc_k0_m_k1,
+                    make_tuple(I0, I0, I0),
+                    gemm1_a_thread_buf);
 
-                    block_sync_lds();
-
-                    kgrad_blockwise_gemm.Run(
-                        gemm1_a_thread_buf, gemm1_b_block_buf, kgrad_thread_buf);
-                }
+                block_sync_lds();
+                vgrad_blockwise_gemm.Run_dv_dk(&gemm1_a_thread_buf(I0), gemm1_b_block_buf.p_data_, cbuf);
             } // end gemm dK
 
             // move slice window
@@ -2632,9 +2445,6 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
             pgrad_gemm_tile_ygrad_blockwise_copy.MoveSrcSliceWindow(
                 ygrad_grid_desc_o0_m_o1,
                 pgrad_gemm_tile_ygrad_block_reset_copy_step); // rewind O and step M
-            qgrad_gemm_tile_k_blockwise_copy.MoveSrcSliceWindow(
-                Gemm2::b_block_desc_n0_n1_n2_k0_k1_k2_k3,
-                Gemm2::b_block_reset_copy_step); // rewind N
             kgrad_gemm_tile_q_blockwise_copy.MoveSrcSliceWindow(
                 q_grid_desc_m0_k_m1, kgrad_gemm_tile_q_block_next_copy_step); // step M
             vgrad_gemm_tile_ygrad_blockwise_copy.MoveSrcSliceWindow(
@@ -2685,7 +2495,7 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
                 GetCShuffleBlockDescriptor_MBlock_MPerBlock_NBlock_NPerBlock();
 
             auto c_shuffle_block_buf = make_dynamic_buffer<AddressSpaceEnum::Lds>(
-                static_cast<FloatCShuffle*>(p_shared),
+                static_cast<OutputDataType*>(p_shared),
                 c_shuffle_block_desc_mblock_mperblock_nblock_nperblock.GetElementSpaceSize());
 
             constexpr auto c_block_desc_m0_n0_m1_n1_m2_n2_n3_n4 = transform_tensor_descriptor(
@@ -2739,7 +2549,7 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
             // shuffle: threadwise copy C from VGPR to LDS
             auto vgrad_thread_copy_vgpr_to_lds =
                 ThreadwiseTensorSliceTransfer_v1r3<FloatGemmAcc,
-                                                   FloatCShuffle,
+                                                   OutputDataType,
                                                    decltype(c_thread_desc_m0_n0_m1_n1_m2_n2_n3_n4),
                                                    decltype(c_block_desc_m0_n0_m1_n1_m2_n2_n3_n4),
                                                    SElementwiseOperation,
@@ -2779,7 +2589,7 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
                          CShuffleNXdlPerWavePerShuffle * NWave * NPerXdl>, // BlockSliceLengths,
                 CShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,
                 Sequence<0, 1, 2, 3>, // typename ThreadClusterArrangeOrder,
-                FloatCShuffle,        // typename SrcData,
+                OutputDataType,        // typename SrcData,
                 OutputDataType,       // typename DstData,
                 decltype(c_shuffle_block_desc_mblock_mperblock_nblock_nperblock),
                 decltype(vgrad_grid_desc_nblock_nperblock_oblock_operblock),
@@ -2797,7 +2607,7 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
             // shuffle: threadwise copy C from VGPR to LDS
             auto kgrad_thread_copy_vgpr_to_lds =
                 ThreadwiseTensorSliceTransfer_v1r3<FloatGemmAcc,
-                                                   FloatCShuffle,
+                                                   OutputDataType,
                                                    decltype(c_thread_desc_m0_n0_m1_n1_m2_n2_n3_n4),
                                                    decltype(c_block_desc_m0_n0_m1_n1_m2_n2_n3_n4),
                                                    SElementwiseOperation,
@@ -2837,7 +2647,7 @@ struct GridwiseBatchedMultiheadAttentionBackward_Qloop_Xdl_CShuffle_Light_V2
                          CShuffleNXdlPerWavePerShuffle * NWave * NPerXdl>, // BlockSliceLengths,
                 CShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,
                 Sequence<0, 1, 2, 3>, // typename ThreadClusterArrangeOrder,
-                FloatCShuffle,        // typename SrcData,
+                OutputDataType,        // typename SrcData,
                 OutputDataType,       // typename DstData,
                 decltype(c_shuffle_block_desc_mblock_mperblock_nblock_nperblock),
                 decltype(kgrad_grid_desc_nblock_nperblock_oblock_operblock),

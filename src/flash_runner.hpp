@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include "bwd_device_gemm_invoker.hpp"
 #include "fwd_device_gemm_invoker.hpp"
 
 #include "static_switch.hpp"
@@ -30,7 +31,8 @@
 class FlashRunner {
 public:
   template <typename FlashParams>
-  void Run(FlashParams &params, hipStream_t &stream) {
+  void Run(FlashParams &params, hipStream_t &stream)
+  {
     HEADDIM_SWITCH(params.d, [&] {
       //BF16_SWITCH(params.is_bf16, [&] {
         BOOL_SWITCH(params.is_mnko_padding, kIsPadding, [&] {
@@ -39,8 +41,8 @@ public:
                                 kIsCausal>(params, stream);
           });
         });
-      });
-    //});
+      //});
+    });
   }
 
 private:
@@ -80,16 +82,16 @@ private:
     //                                                      DeviceGemmTraits>;
     //   Invoker(params, stream);
     // } else {
-    //   // performance mode
-    //   // input, output, gemm, dropout, cshuffle, masking specialization,
-    //   // deterministic
-    //   using DeviceGemmTraits =
-    //       device_gemm_trait::Backward<T, T, device_gemm_trait::Float16, 8,
-    //                                   kGemmSpec, kMaskingSpec,
-    //                                   kIsDeterministic>;
-    //   using Invoker = bwd_device_gemm::DeviceGemmInvoker<DeviceGemmTemplate,
-    //                                                      DeviceGemmTraits>;
-    //   Invoker(params, stream);
+      // performance mode
+      // input, output, gemm, dropout, cshuffle, masking specialization,
+      // deterministic
+      using DeviceGemmTraits =
+          device_gemm_trait::Backward<T, T, device_gemm_trait::Float16, 8,
+                                      kGemmSpec, kMaskingSpec,
+                                      kIsDeterministic>;
+      using Invoker = bwd_device_gemm::DeviceGemmInvoker<DeviceGemmTemplate,
+                                                         DeviceGemmTraits>;
+      Invoker(params, stream);
     // }
   }
 };

@@ -24,27 +24,27 @@
 #include "flash_runner.hpp"
 
 template <>
-void FlashRunner::run_<FlashFwdGroupedParams, 32, device_gemm_trait::Float16,
-                       true, true>(FlashFwdGroupedParams &params,
+void FlashRunner::run_<FlashBwdBatchedParams, 128, device_gemm_trait::Float16,
+                       true, true>(FlashBwdBatchedParams &params,
                                    hipStream_t &stream) {
-  BOOL_SWITCH(BaseParams::kIsDeterministic, kIsDeterministic, [&] {
-    this->template run_fwd_<
-        FlashFwdGroupedParams, fwd_device_gemm::DeviceGemmGroupedHeadDim32,
+  // BOOL_SWITCH(BaseParams::kIsDeterministic, kIsDeterministic, [&] {
+    this->template run_bwd_<
+        FlashBwdBatchedParams, bwd_device_gemm::DeviceGemmBatchedHeadDim128,
         device_gemm_trait::Float16, device_gemm_trait::kGemmSpecPadding,
-        device_gemm_trait::kMaskingSpecCausal, kIsDeterministic>(params,
+        device_gemm_trait::kMaskingSpecCausal, false>(params,
                                                                  stream);
-  });
-}
+  // });
+} // FlashRunner::run_()
 
 template <>
-void FlashRunner::run_<FlashFwdGroupedParams, 32, device_gemm_trait::Float16,
-                       false, true>(FlashFwdGroupedParams &params,
+void FlashRunner::run_<FlashBwdBatchedParams, 128, device_gemm_trait::Float16,
+                       false, true>(FlashBwdBatchedParams &params,
                                     hipStream_t &stream) {
-  BOOL_SWITCH(BaseParams::kIsDeterministic, kIsDeterministic, [&] {
-    this->template run_fwd_<
-        FlashFwdGroupedParams, fwd_device_gemm::DeviceGemmGroupedHeadDim32,
+  // BOOL_SWITCH(BaseParams::kIsDeterministic, kIsDeterministic, [&] {
+    this->template run_bwd_<
+        FlashBwdBatchedParams, bwd_device_gemm::DeviceGemmBatchedHeadDim128,
         device_gemm_trait::Float16, device_gemm_trait::kGemmSpecDefault,
-        device_gemm_trait::kMaskingSpecCausal, kIsDeterministic>(params,
+        device_gemm_trait::kMaskingSpecCausal, false>(params,
                                                                  stream);
-  });
+  // }); 
 } // FlashRunner::run_()

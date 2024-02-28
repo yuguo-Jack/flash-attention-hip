@@ -14,6 +14,46 @@
 #include <exception>
 #include <string>
 
+template<typename T>
+void printTensor(const std::string& str, const T* devTensor, size_t b, size_t s, size_t n, size_t h) {
+  T* hostTensor;
+  hostTensor = (T*)malloc(b * s * n * h * sizeof(T));
+  hipMemcpy(hostTensor, devTensor, b * s * n * h * sizeof(T), hipMemcpyDeviceToHost);
+  std::cout << str << ": ";
+  for(int i = 0; i < h; i++) {
+    if (i % 32 == 0) {
+      std::cout << std::endl;
+    }
+    std::cout << static_cast<float>(hostTensor[i]) << ", ";
+  }
+  std::cout << " ...... ";
+  for(int i = (b * s * n - 1) * h; i < b * s * n * h; i++) {
+    if (i % 32 == 0) {
+      std::cout << std::endl;
+    }
+    std::cout << static_cast<float>(hostTensor[i]) << ", ";
+  }
+  std::cout << str << " finish" << std::endl;
+  free(hostTensor);
+}
+
+template<>
+void printTensor<float>(const std::string& str, const float* devTensor, size_t b, size_t s, size_t n, size_t h) {
+  float* hostTensor;
+  hostTensor = (float*)malloc(b * s * n * h * sizeof(float));
+  hipMemcpy(hostTensor, devTensor, b * s * n * h * sizeof(float), hipMemcpyDeviceToHost);
+  std::cout << str << ": ";
+  for(int i = 0; i < s / 8; i++) {
+    if (i % 32 == 0) {
+      std::cout << std::endl;
+    }
+    std::cout << static_cast<float>(hostTensor[i]) << ", ";
+  }
+  std::cout << " ...... " << std::endl;
+  std::cout << str << " finish" << std::endl;
+  free(hostTensor);
+}
+
 #define ASSERT_CHECK(__cond)                             \
       do {                                               \
         const bool __cond_var = (__cond);                \
@@ -79,6 +119,16 @@ void run_mha_varlen_fwd(FlashFwdGroupedParams &params, hipStream_t stream) {
     flash_runner.Run(params, stream);
 }
 
+void run_mha_bwd(FlashBwdBatchedParams &params, hipStream_t stream) {
+  FlashRunner flash_runner;
+  flash_runner.Run(params, stream);
+}
+
+void run_mha_varlen_bwd(FlashBwdGroupedParams &params, hipStream_t stream) {
+  FlashRunner flash_runner;
+  flash_runner.Run(params, stream);
+}
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -114,16 +164,17 @@ bool flash_attn_fwd(const void * const q,
     const bool is_dropout = p_dropout > 0.0;
     CHECK_FWD_EXECTUABLE(seqlen_q, seqlen_k)
     ASSERT_CHECK(is_bf16 == false);
-    ASSERT_CHECK(return_softmax == false);
 
     FlashFwdBatchedParams params(batch_size, seqlen_q, seqlen_k, num_heads,
                                 num_heads_k, head_size, const_cast<void *>(q), const_cast<void *>(k),
-                                const_cast<void *>(v), out, nullptr, softmax_lse_ptr, 
+                                const_cast<void *>(v), out, softmax_ptr, softmax_lse_ptr, 
                                 p_dropout, softmax_scale, is_causal, return_softmax);
 
     if (is_dropout) {
         auto philox_args = at::PhiloxCudaState(seed, offset);
         params.seeds = at::cuda::philox::unpack(philox_args);
+        auto rng_state_ptr = reinterpret_cast<uint64_t *>(rng_state);
+        std::tie(rng_state_ptr[0], rng_state_ptr[1]) = params.seeds;
     }
 
     run_mha_fwd(params, stream);
@@ -219,16 +270,45 @@ bool flash_attn_bwd(const void * const dout,
                     const int64_t * const mask_dims) {
     FLASHATTNLIB_BEGIN_FUNC
     const bool is_dropout = p_dropout > 0.0;
-    const int mask_head_mod_size = attn_mask ? mask_dims[1] : 0;
-    const int mask_seq_q_mod_size = attn_mask ? mask_dims[2] : 0;
-
     CHECK_BWD_EXECTUABLE(seqlen_q, seqlen_k)
+    ASSERT_CHECK(is_bf16 == false);
 
-    // bool loop = seqlen_k > blocksize_c;
-    // TODO: change later, for now set to true for simplicity
-    const bool loop = true;
+    hipMemset(dq, 0, sizeof(half) * batch_size * seqlen_q * num_heads * head_size);
+    // hipMemset(dk, 0, sizeof(half) * batch_size * seqlen_k * num_heads_k * head_size);
+    // hipMemset(dv, 0, sizeof(half) * batch_size * seqlen_k * num_heads_k * head_size);
 
-    std::cout << "!!!!!!!!!!!!!!!!!!!! flashattn2 bwd is not surpport on zifang dcu for now !!!!!!!!!!!!!!!!!!!!" << std::endl;
+    FlashBwdBatchedParams params(
+      batch_size, seqlen_q, seqlen_k, num_heads, num_heads_k, head_size,
+      const_cast<void *>(q), // q is padded
+      const_cast<void *>(k), // k is padded
+      const_cast<void *>(v), // v is padded
+      const_cast<void *>(out), // out is padded
+      const_cast<void *>(dout),
+      dq, // dq is padded
+      dk, // dk is padded
+      dv, // dv is padded
+      const_cast<void *>(softmax_d), const_cast<void *>(softmax_lse), p_dropout, softmax_scale, is_causal);
+
+    if (is_dropout) {
+      auto philox_args = at::PhiloxCudaState(seed, offset);
+      params.seeds = at::cuda::philox::unpack(philox_args);
+    }
+
+    // printTensor<half>("******* Q: ", static_cast<half*>(params.q_ptr), batch_size, seqlen_q, num_heads, head_size);
+    // printTensor<half>("******* K: ", static_cast<half*>(params.k_ptr), batch_size, seqlen_k, num_heads_k, head_size);
+    // printTensor<half>("******* V: ", static_cast<half*>(params.v_ptr), batch_size, seqlen_k, num_heads_k, head_size);
+    // printTensor<half>("******* out: ", static_cast<half*>(params.out_ptr), batch_size, seqlen_q, num_heads, head_size);
+    // printTensor<half>("******* dout: ", static_cast<half*>(params.dout_ptr), batch_size, seqlen_q, num_heads, head_size);
+    // printTensor<float>("******* softmax_d: ", static_cast<float*>(params.dsoftmax_ptr), batch_size, seqlen_q, num_heads, 1);
+    // printTensor<half>("******* dQ: ", static_cast<half*>(params.dq_ptr), batch_size, seqlen_q, num_heads, head_size);
+    // printTensor<half>("******* dK: ", static_cast<half*>(params.dk_ptr), batch_size, seqlen_k, num_heads_k, head_size);
+    // printTensor<half>("******* dV: ", static_cast<half*>(params.dv_ptr), batch_size, seqlen_k, num_heads_k, head_size);
+    // printTensor<float>("******* softmax_lse: ", static_cast<float*>(params.softmax_lse_ptr), batch_size, seqlen_q, num_heads, 1);
+    run_mha_bwd(params, stream);
+    // printTensor<half>("******* dQ after fa: ", static_cast<half*>(params.dq_ptr), batch_size, seqlen_q, num_heads, head_size);
+    // printTensor<half>("******* dK after fa: ", static_cast<half*>(params.dk_ptr), batch_size, seqlen_k, num_heads_k, head_size);
+    // printTensor<half>("******* dV after fa: ", static_cast<half*>(params.dv_ptr), batch_size, seqlen_k, num_heads_k, head_size);
+    // printTensor<float>("******* softmax_d after fa: ", static_cast<float*>(params.dsoftmax_ptr), batch_size, seqlen_q, num_heads, 1);
     
     return true;
     
@@ -272,14 +352,33 @@ bool flash_attn_varlen_bwd(const void * const dout,
                            const int64_t * const mask_dims) {
     FLASHATTNLIB_BEGIN_FUNC
     const bool is_dropout = p_dropout > 0.0;
-    const int mask_head_mod_size = attn_mask ? mask_dims[1] : 0;
-    const int mask_seq_q_mod_size = attn_mask ? mask_dims[2] : 0;
-
-    const bool loop = true;
-
     CHECK_BWD_EXECTUABLE(max_seqlen_q, max_seqlen_k)
+    ASSERT_CHECK(is_bf16 == false);
 
-    std::cout << "!!!!!!!!!!!!!!!!!!!! flashattn2 bwd is not surpport on zifang dcu for now !!!!!!!!!!!!!!!!!!!!" << std::endl;
+    hipMemset(dq, 0, sizeof(half) * batch_size * max_seqlen_q * num_heads * head_size);
+    hipMemset(dk, 0, sizeof(half) * batch_size * max_seqlen_k * num_heads_k * head_size);
+    hipMemset(dv, 0, sizeof(half) * batch_size * max_seqlen_k * num_heads_k * head_size);
+
+    FlashBwdGroupedParams params(
+      batch_size, max_seqlen_q, max_seqlen_k, num_heads, num_heads_k,
+      head_size,
+      const_cast<void *>(q), // q is padded
+      const_cast<void *>(k), // k is padded
+      const_cast<void *>(v), // v is padded
+      const_cast<void *>(out), // out is padded
+      const_cast<void *>(dout),
+      dq, // dq is padded
+      dk, // dk is padded
+      dv, // dv is padded
+      cu_seqlens_q, cu_seqlens_k, std::vector<void*>(),
+      const_cast<void *>(softmax_lse), p_dropout, softmax_scale, is_causal);
+
+    if (is_dropout) {
+      auto philox_args = at::PhiloxCudaState(seed, offset);
+      params.seeds = at::cuda::philox::unpack(philox_args);
+    }
+
+    run_mha_varlen_bwd(params, stream);
     
     return true;
     

@@ -889,22 +889,6 @@ struct XdlopsGemm
 
         return make_tuple(blk_id, blk_td);
     }
-    __device__ static auto GetBlkIdx(const index_t laneId)
-    {
-        constexpr auto threadidx_to_blk_idx_adaptor = make_single_stage_tensor_adaptor(
-            make_tuple(make_merge_transform(
-                make_tuple(1, mfma_instr.num_input_blks, mfma_instr.num_threads_per_blk))),
-            make_tuple(Sequence<0, 1, 2>{}),
-            make_tuple(Sequence<0>{}));
-
-        const auto blk_idx =
-            threadidx_to_blk_idx_adaptor.CalculateBottomIndex(make_multi_index(laneId));
-
-        const auto blk_id = blk_idx[I1];
-        const auto blk_td = blk_idx[I2];
-
-        return make_tuple(blk_id, blk_td);
-    }
 
     __host__ __device__ static auto CalculateAThreadOriginDataIndex()
     {
@@ -923,22 +907,7 @@ struct XdlopsGemm
             return make_tuple(0, laneId);
         }
     }
-    __host__ __device__ static auto CalculateAThreadOriginDataIndex(const index_t laneId)
-    {
-        const auto blk_idx = GetBlkIdx(laneId);
 
-        const auto blk_id = blk_idx[I0];
-        const auto blk_td = blk_idx[I1];
-
-        if constexpr(mfma_instr.is_k_reduction)
-        {
-            return make_tuple(blk_id, blk_td);
-        }
-        else
-        {
-            return make_tuple(0, laneId);
-        }
-    }
     __host__ __device__ static auto CalculateBThreadOriginDataIndex()
     {
         const auto laneId  = GetLaneId();

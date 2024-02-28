@@ -1080,7 +1080,7 @@ struct BlockwiseGemmXdlops_v2
         //if(blockIdx.x==0&&threadIdx.x==0)printf("Gemm1 KPerThread=%d,KPack=%d,MRepeat=%d,NRepeat=%d\n",KPerThread,KPack,MRepeat,NRepeat);
         //Gemm0 KPerThread=16,KPack=8,MRepeat=1,NRepeat=4/8(dim32 dim128=4,dim64=8)
         //Gemm1 KPerThread=16,KPack=4,MRepeat=1,NRepeat=1
-        static_for<0, KPerThread / KPack, 1>{}([&](auto k) { // k=0,1,2 instead of k=0,kpack*1, ...
+        static_for<0, KPerThread / KPack, 1>{}([&](auto k) {
             static_for<0, MRepeat, 1>{}([&](auto m0) {
                 // read A
                 a_thread_copy_.Run(a_block_desc_m0_m1_m2_k,
@@ -1186,6 +1186,10 @@ struct BlockwiseGemmXdlops_v2_dl
     static constexpr auto I1 = Number<1>{};
     static constexpr auto I2 = Number<2>{};
     static constexpr auto I3 = Number<3>{};
+    static constexpr auto I4 = Number<4>{};
+    static constexpr auto I5 = Number<5>{};
+    static constexpr auto I6 = Number<6>{};
+    static constexpr auto I7 = Number<7>{};
 
     using ThisThreadBlock = ThisThreadBlock<BlockSize>;
 
@@ -1239,17 +1243,6 @@ struct BlockwiseGemmXdlops_v2_dl
         return make_tuple(0, waveId_m, xdlops_a_idx[I1], KPack * xdlops_a_idx[I0]);
     }
 
-    __device__ static auto CalculateAThreadOriginDataIndex(const index_t laneId)
-    {
-        const auto wave_idx = GetWaveIdx();
-
-        const auto waveId_m = wave_idx[I0];
-
-        const auto xdlops_a_idx = xdlops_gemm.CalculateAThreadOriginDataIndex(laneId);
-
-        return make_tuple(0, waveId_m, xdlops_a_idx[I1], KPack * xdlops_a_idx[I0]);
-    }
-
     __device__ static auto CalculateBThreadOriginDataIndex()
     {
         const auto wave_idx = GetWaveIdx();
@@ -1257,17 +1250,6 @@ struct BlockwiseGemmXdlops_v2_dl
         const auto waveId_n = wave_idx[I1];
 
         const auto xdlops_b_idx = xdlops_gemm.CalculateBThreadOriginDataIndex();
-
-        return make_tuple(0, waveId_n, xdlops_b_idx[I1], KPack * xdlops_b_idx[I0]);
-    }
-
-    __device__ static auto CalculateBThreadOriginDataIndex(const index_t laneId)
-    {
-        const auto wave_idx = GetWaveIdx();
-
-        const auto waveId_n = wave_idx[I1];
-        //xdlops_gemm.CalculateAThreadOriginDataIndex and xdlops_gemm.CalculateAThreadOriginDataIndex have same codes.
-        const auto xdlops_b_idx = xdlops_gemm.CalculateAThreadOriginDataIndex(laneId);
 
         return make_tuple(0, waveId_n, xdlops_b_idx[I1], KPack * xdlops_b_idx[I0]);
     }
@@ -1540,140 +1522,33 @@ struct BlockwiseGemmXdlops_v2_dl
                         const BBlockBuffer& b_block_buf,
                         CThreadBuffer& c_thread_buf) const
     {
-        if constexpr(Gemm1NPerBlock==128){
-            using FloatAB4  = typename vector_type<FloatAB, 4>::type;
-            auto a_thread_buf = make_static_buffer<AddressSpaceEnum::Vgpr, FloatAB>(
-                a_thread_desc_.GetElementSpaceSize());
-            auto a_thread_buf2 = make_static_buffer<AddressSpaceEnum::Vgpr, FloatAB>(
-                a_thread_desc_.GetElementSpaceSize());
-            // if(blockIdx.x==0&&threadIdx.x==0)printf("Gemm1 KPerThread=%d,KPack=%d,MRepeat=%d,NRepeat=%d\n",KPerThread,KPack,MRepeat,NRepeat);
-            //Gemm0 KPerThread=16,KPack=8,MRepeat=1,NRepeat=4/8
-            //Gemm1 KPerThread=16,KPack=4,MRepeat=1,NRepeat=1/2/4
-            const index_t warpid=threadIdx.x%64;
-            const index_t BStartIndex=warpid/32*4;
-            const index_t AStartIndex=warpid%32;
-            const index_t AStartIndex2=AStartIndex+32;
-            static_for<0, KPerThread / KPack, 1>{}([&](auto k) { // k=0,1,2 instead of k=0,kpack*1, ...
-                static_for<0, MRepeat, 1>{}([&](auto m0) {
-                    static_for<0, NRepeat, 1>{}([&](auto n0) {
-                        // read A
-
-                        a_thread_copy_.RunWithIdx(a_block_desc_m0_m1_m2_k,
-                                                    make_tuple(m0, I0, I0, Number<k * AMmaKStride>{}),
-                                                    a_block_buf,
-                                                    a_thread_desc_,
-                                                    make_tuple(I0, I0, I0, I0),
-                                                    CalculateAThreadOriginDataIndex(AStartIndex),
-                                                    a_thread_buf);
-                        a_thread_copy_.RunWithIdx(a_block_desc_m0_m1_m2_k,
-                                                    make_tuple(m0, I0, I0, Number<k * AMmaKStride>{}),
-                                                    a_block_buf,
-                                                    a_thread_desc_,
-                                                    make_tuple(I0, I0, I0, I0),
-                                                    CalculateAThreadOriginDataIndex(AStartIndex2),
-                                                    a_thread_buf2);
-
-                        constexpr index_t c_offset = c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
-                        auto & cbuf = c_thread_buf.GetVectorTypeReference(Number<c_offset>{}).template AsType<float16_t>()[Number<0>{}];
-                        FloatAB4 *pa=(FloatAB4*)&(a_thread_buf[Number<0>{}]);
-                        FloatAB4 *pa2=(FloatAB4*)&(a_thread_buf2[Number<0>{}]);
-                        constexpr int offset1=n0()*64+k()*516;
-                        constexpr int offset2=offset1+1;
-                        constexpr int offset3=offset1+258;
-                        constexpr int offset4=offset3+1;
-                        for(int k1=0;k1<4;k1++){
-                            int k2=k1*8+BStartIndex;
-                            for(int m=0;m<4;m++){
-                                int k3=(k2+m)*2;
-                                FloatAB4 bbuf;
-                                FloatAB4 *pblock=(FloatAB4*)&(b_block_buf[Number<0>{}]);
-                                float *c=(float*)&cbuf+m+4*k1;
-                                bbuf=pblock[offset1+k3];
-                                inner_product(pa[0],bbuf,*c);
-                                bbuf=pblock[offset2+k3];
-                                inner_product(pa[1],bbuf,*c);
-                                bbuf=pblock[offset3+k3];
-                                inner_product(pa2[0],bbuf,*c);
-                                bbuf=pblock[offset4+k3];
-                                inner_product(pa2[1],bbuf,*c);
-                            }
-                        }
-                    });
-                });
-            });
-        }
-        else{
-            using FloatAB4  = typename vector_type<FloatAB, 4>::type;
-            auto a_thread_buf = make_static_buffer<AddressSpaceEnum::Vgpr, FloatAB>(
-                a_thread_desc_.GetElementSpaceSize());
-            auto b_thread_buf = make_static_buffer<AddressSpaceEnum::Vgpr, FloatAB>(
-                b_thread_desc_.GetElementSpaceSize());
-            auto a_thread_buf2 = make_static_buffer<AddressSpaceEnum::Vgpr, FloatAB>(
-                a_thread_desc_.GetElementSpaceSize());
-            auto b_thread_buf2 = make_static_buffer<AddressSpaceEnum::Vgpr, FloatAB>(
-                b_thread_desc_.GetElementSpaceSize());
-            //if(blockIdx.x==0&&threadIdx.x==0)printf("Gemm1 KPerThread=%d,KPack=%d,MRepeat=%d,NRepeat=%d\n",KPerThread,KPack,MRepeat,NRepeat);
-            //Gemm0 KPerThread=16,KPack=8,MRepeat=1,NRepeat=4/8
-            //Gemm1 KPerThread=16,KPack=4,MRepeat=1,NRepeat=1/2/4
-            const index_t warpid=threadIdx.x%64;
-            const index_t BStartIndex=warpid/32*4;
-            const index_t AStartIndex=warpid%32;
-            const index_t AStartIndex2=AStartIndex+32;
-            static_for<0, KPerThread / KPack, 1>{}([&](auto k) { // k=0,1,2 instead of k=0,kpack*1, ...
-                static_for<0, MRepeat, 1>{}([&](auto m0) {
-                    static_for<0, NRepeat, 1>{}([&](auto n0) {
-                        // read A
-
-                        a_thread_copy_.RunWithIdx(a_block_desc_m0_m1_m2_k,
-                                                    make_tuple(m0, I0, I0, Number<k * AMmaKStride>{}),
-                                                    a_block_buf,
-                                                    a_thread_desc_,
-                                                    make_tuple(I0, I0, I0, I0),
-                                                    CalculateAThreadOriginDataIndex(AStartIndex),
-                                                    a_thread_buf);
-                        a_thread_copy_.RunWithIdx(a_block_desc_m0_m1_m2_k,
-                                                    make_tuple(m0, I0, I0, Number<k * AMmaKStride>{}),
-                                                    a_block_buf,
-                                                    a_thread_desc_,
-                                                    make_tuple(I0, I0, I0, I0),
-                                                    CalculateAThreadOriginDataIndex(AStartIndex2),
-                                                    a_thread_buf2);
-
-                        constexpr index_t c_offset = c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
-                        auto & cbuf = c_thread_buf.GetVectorTypeReference(Number<c_offset>{}).template AsType<float16_t>()[Number<0>{}];
-                        FloatAB4 *pa=(FloatAB4*)&(a_thread_buf[Number<0>{}]);
-                        FloatAB4 *pa2=(FloatAB4*)&(a_thread_buf2[Number<0>{}]);
-                        FloatAB4 *pb=(FloatAB4*)&(b_thread_buf[Number<0>{}]);
-                        FloatAB4 *pb2=(FloatAB4*)&(b_thread_buf2[Number<0>{}]);
-                        for(int k1=0;k1<4;k1++){
-                            int k2=k1*8+BStartIndex;
-                            for(int m=0;m<4;m++){
-                                b_thread_copy_.RunWithIdx(b_block_desc_n0_n1_n2_k,
-                                                    make_tuple(n0, I0, I0, Number<k * BMmaKStride>{}),
-                                                    b_block_buf,
-                                                    b_thread_desc_,
-                                                    make_tuple(I0, I0, I0, I0),
-                                                    CalculateBThreadOriginDataIndex(m+k2),
-                                                    b_thread_buf);
-                                b_thread_copy_.RunWithIdx(b_block_desc_n0_n1_n2_k,
-                                                    make_tuple(n0, I0, I0, Number<k * BMmaKStride>{}),
-                                                    b_block_buf,
-                                                    b_thread_desc_,
-                                                    make_tuple(I0, I0, I0, I0),
-                                                    CalculateBThreadOriginDataIndex(m+k2+32),
-                                                    b_thread_buf2);
-                                
-                                float *c=(float*)&(cbuf)+m+4*k1;
-                                for(int i=0;i<KPack / xdlops_gemm.K1PerXdlops;i++){
-                                    inner_product(*(pa+i),*(pb+i),*c);
-                                    inner_product(*(pa2+i),*(pb2+i),*c);
-                                }
-
-                            }
-                        }
-                    });
-                });
-            });            
+        using FloatAB8  = typename vector_type<FloatAB, 8>::type;
+        FloatAB8 a_thread_buf[2];
+        // if(blockIdx.x==0&&threadIdx.x==0)printf("Gemm1 KPerThread=%d,KPack=%d,MRepeat=%d,NRepeat=%d\n",KPerThread,KPack,MRepeat,NRepeat);
+        //Gemm0 KPerThread=16,KPack=8,MRepeat=1,NRepeat=4
+        const index_t warpid=threadIdx.x%64;
+        const index_t BStartIndex=warpid/32*4;
+        FloatAB8* ablock=(FloatAB8*)a_block_buf.p_data_+warpid%32+threadIdx.x/64*32;
+        FloatAB8 *pblock=(FloatAB8*)b_block_buf.p_data_;
+        for(int k=0;k<KPerThread / KPack;k++){
+            a_thread_buf[0]=ablock[258*k];
+            a_thread_buf[1]=ablock[258*k+129];
+            for(int n0=0;n0<NRepeat;n0++) {
+                int offset1=n0*32+k*258;
+                int offset2=offset1+129;
+                float * cbuf = &(c_thread_buf.GetVectorTypeReference(I0).template AsType<float>()(I0))+n0*16;
+                for(int k1=0;k1<4;k1++){
+                    for(int m=0;m<4;m++){
+                        int k2=k1*8+BStartIndex+m;
+                        FloatAB8 bbuf;
+                        float *c=cbuf+m+4*k1;
+                        bbuf=pblock[offset1+k2];
+                        inner_product(a_thread_buf[0],bbuf,*c);
+                        bbuf=pblock[offset2+k2];
+                        inner_product(a_thread_buf[1],bbuf,*c);
+                    }
+                }
+            }
         }
     }
 
@@ -1683,108 +1558,242 @@ struct BlockwiseGemmXdlops_v2_dl
                         const BBlockBuffer& b_block_buf,
                         CThreadBuffer& c_thread_buf) const
     {
-        if constexpr(Gemm1NPerBlock==128){
-            using FloatAB2  = typename vector_type<FloatAB, 2>::type;
-            const index_t warpid=threadIdx.x%64;
-            const index_t BStartIndex=warpid/32*4;
-            const int index_p=warpid/32;
-            int *p=(int*)&(a_block_buf[Number<0>{}]);
-            int abuf[8];
-            for(int i=0;i<8;i++){
-                abuf[i]=__shfl_xor(p[i],32);
-            }
-            FloatAB2 *pa1,*pa2;
-            if(warpid<32){
-                pa2=(FloatAB2*)&(abuf[0]);
-                pa1=(FloatAB2*)p;
-            }
-            else {
-                pa1=(FloatAB2*)&(abuf[0]);
-                pa2=(FloatAB2*)p;
-            }
-            static_for<0, KPerThread / KPack, 1>{}([&](auto k) { // k=0,1,2 instead of k=0,kpack*1, ...
-                static_for<0, MRepeat, 1>{}([&](auto m0) {
-                    static_for<0, NRepeat, 1>{}([&](auto n0) {
-                        constexpr index_t c_offset = c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
-                        auto & cbuf = c_thread_buf.GetVectorTypeReference(Number<c_offset>{}).template AsType<float16_t>()[Number<0>{}];
-                        constexpr int offset1=n0()*32+k()*512;
-                        constexpr int offset2=offset1+128;
-                        constexpr int offset3=offset1+256;
-                        constexpr int offset4=offset2+256;
-                        constexpr int offseta1=2*k();
-                        constexpr int offseta2=2*k()+1;
-                        int thread16=warpid/32*16;
-                        for(int k1=0;k1<16;k1++){
-                            FloatAB2 *pblock=(FloatAB2*)&(b_block_buf[Number<0>{}]);
-                            float *c=(float*)&cbuf+k1;
-                            FloatAB2 bbuf;
-                            bbuf=pblock[offset1+k1+thread16];
-                            inner_product(pa1[offseta1],bbuf,*c);
-                            bbuf=pblock[offset2+k1+thread16];
-                            inner_product(pa1[offseta2],bbuf,*c);
-                            bbuf=pblock[offset3+k1+thread16];
-                            inner_product(pa2[offseta1],bbuf,*c);
-                            bbuf=pblock[offset4+k1+thread16];
-                            inner_product(pa2[offseta2],bbuf,*c);
-                        }
-                    });
-                });
-            });
+        using FloatAB2  = typename vector_type<FloatAB, 2>::type;
+        const index_t warpid=threadIdx.x%64;
+        const index_t BStartIndex=warpid/32*4;
+        int *p=(int*)&(a_block_buf[I0]);
+        int abuf[8];
+        for(int i=0;i<8;i++){
+            abuf[i]=__shfl_xor(p[i],32);
         }
-        else{
-            using FloatAB4  = typename vector_type<FloatAB, 4>::type;
-            auto b_thread_buf = make_static_buffer<AddressSpaceEnum::Vgpr, FloatAB>(
-                b_thread_desc_.GetElementSpaceSize());
-            auto b_thread_buf2 = make_static_buffer<AddressSpaceEnum::Vgpr, FloatAB>(
-                b_thread_desc_.GetElementSpaceSize());
-            int32x2_t abuf;
-            FloatAB4 *pa[2];
-            //if(blockIdx.x==0&&threadIdx.x==0)printf("Gemm1 KPerThread=%d,KPack=%d,MRepeat=%d,NRepeat=%d\n",KPerThread,KPack,MRepeat,NRepeat);
-            //Gemm1 KPerThread=16,KPack=4,MRepeat=1,NRepeat=1,2,4
-            const index_t warpid=threadIdx.x%64;
-            const index_t BStartIndex=warpid/32*4;
-            const int index_p=warpid/32;
-            static_for<0, KPerThread / KPack, 1>{}([&](auto k) { // k=0,1,2 instead of k=0,kpack*1, ...
-                static_for<0, MRepeat, 1>{}([&](auto m0) {
-                    static_for<0, NRepeat, 1>{}([&](auto n0) {
-                        int *p=(int*)&(a_block_buf[Number<k*4>{}]);
-                        for(int i=0;i<2;i++){
-                            abuf[i]=__shfl_xor(p[i],32);
-                        }
-                        pa[1-index_p]=(FloatAB4*)&abuf;
-                        pa[index_p]=(FloatAB4*)p;
-                        constexpr index_t c_offset = c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
-                        auto & cbuf = c_thread_buf.GetVectorTypeReference(Number<c_offset>{}).template AsType<float16_t>()[Number<0>{}];
-                        FloatAB4 *pb=(FloatAB4*)&(b_thread_buf[Number<0>{}]);
-                        FloatAB4 *pb2=(FloatAB4*)&(b_thread_buf2[Number<0>{}]);
-                        for(int k1=0;k1<4;k1++){
-                            int k2=k1*8+BStartIndex;
-                            for(int m=0;m<4;m++){
-                                b_thread_copy_.RunWithIdx(b_block_desc_n0_n1_n2_k,
-                                                    make_tuple(n0, I0, I0, Number<k * BMmaKStride>{}),
-                                                    b_block_buf,
-                                                    b_thread_desc_,
-                                                    make_tuple(I0, I0, I0, I0),
-                                                    CalculateBThreadOriginDataIndex(m+k2),
-                                                    b_thread_buf);
-                                b_thread_copy_.RunWithIdx(b_block_desc_n0_n1_n2_k,
-                                                    make_tuple(n0, I0, I0, Number<k * BMmaKStride>{}),
-                                                    b_block_buf,
-                                                    b_thread_desc_,
-                                                    make_tuple(I0, I0, I0, I0),
-                                                    CalculateBThreadOriginDataIndex(m+k2+32),
-                                                    b_thread_buf2);
-                                float *c=(float*)&cbuf+m+4*k1;
-                                inner_product(*(pa[0]),*(pb),*c);
-                                inner_product(*(pa[1]),*(pb2),*c);
-                            }
-                        }
-                    });
-                });
-            });
+        FloatAB2 *pa1,*pa2;
+        if(warpid<32){
+            pa2=(FloatAB2*)&(abuf[0]);
+            pa1=(FloatAB2*)p;
+        }
+        else {
+            pa1=(FloatAB2*)&(abuf[0]);
+            pa2=(FloatAB2*)p;
+        }
+        FloatAB2 *pblock_=(FloatAB2*)b_block_buf.p_data_;
+        for(int k=0;k< KPerThread / KPack;k++){
+            for(int n0=0;n0<NRepeat;n0++){
+                float * cbuf = &(c_thread_buf.GetVectorTypeReference(I0).template AsType<float>()(I0))+n0*16;
+                int offseta1=2*k;
+                int offseta2=2*k+1;
+                FloatAB2 *pblock = pblock_ + n0*32+k*4*Gemm1NPerBlock;
+                FloatAB2 *pblock2=pblock+2*Gemm1NPerBlock;
+                for(int k1=0;k1<4;k1++){
+                    for(int m=0;m<4;m++){
+                        int k2=k1*8+BStartIndex+m;
+                        float *c = cbuf+m+4*k1;
+                        FloatAB2 bbuf;
+                        bbuf=pblock[k2];
+                        inner_product(pa1[offseta1],bbuf,*c);
+                        bbuf=pblock[k2+Gemm1NPerBlock];
+                        inner_product(pa1[offseta2],bbuf,*c);
+                        bbuf=pblock2[k2];
+                        inner_product(pa2[offseta1],bbuf,*c);
+                        bbuf=pblock2[k2+Gemm1NPerBlock];
+                        inner_product(pa2[offseta2],bbuf,*c);
+                    }
+                }
+            }
         }
     }
 
+    __device__ void Run_dv_dk(FloatAB* a_block_buf,FloatAB* b_block_buf,float* c_thread_buf) const
+    {
+        using FloatAB2  = typename vector_type<FloatAB, 2>::type;
+        const index_t warpid=threadIdx.x%64;
+        const index_t BStartIndex=warpid/32*4;
+        int *p=(int*)a_block_buf;
+        int abuf[8];
+        for(int i=0;i<8;i++){
+            abuf[i]=__shfl_xor(p[i],32);
+        }
+        FloatAB2 *pa1,*pa2;
+        if(warpid<32){
+            pa2=(FloatAB2*)&(abuf[0]);
+            pa1=(FloatAB2*)p;
+        }
+        else {
+            pa1=(FloatAB2*)&(abuf[0]);
+            pa2=(FloatAB2*)p;
+        }
+        if constexpr(Gemm1NPerBlock==128)
+            for(int k=0;k< KPerThread / KPack;k++) { 
+                for(int n0=0;n0< NRepeat;n0++) {
+                    float *cbuf = c_thread_buf +n0*16;
+                    int offseta1=2*k;
+                    int offseta2=2*k+1;
+                    FloatAB2 *pblock=(FloatAB2*)b_block_buf;
+                    pblock += k*512+n0*32;
+                    FloatAB2 bbuf;
+                    for(int k1=0;k1<4;k1++){
+                        for(int m=0;m<4;m++){
+                            int k2=k1*8+BStartIndex+m;
+                            float *c = cbuf+m+4*k1;
+                            bbuf=pblock[k2];
+                            inner_product(pa1[offseta1],bbuf,*c);
+                            bbuf=pblock[k2+128];
+                            inner_product(pa1[offseta2],bbuf,*c);
+                            bbuf=pblock[k2+256];
+                            inner_product(pa2[offseta1],bbuf,*c);
+                            bbuf=pblock[k2+384];
+                            inner_product(pa2[offseta2],bbuf,*c);
+                        }
+                    }   
+                }
+            }
+        else {
+            #pragma unroll 1
+            for(int k=0;k< KPerThread / KPack;k++) { 
+                for(int n0=0;n0< NRepeat;n0++) {
+                    float *cbuf = c_thread_buf +n0*16;
+                    int offseta1=2*k;
+                    int offseta2=2*k+1;
+                    FloatAB *pblock=b_block_buf+ k*64+n0*4128;
+                    FloatAB2 bbuf;
+                    for(int k1=0;k1<4;k1++){
+                        for(int m=0;m<4;m++){
+                            int k2=k1*8+BStartIndex+m;
+                            k2=k2/8*1032 + k2%8;
+                            float *c = cbuf+m+4*k1;
+                            bbuf[0]=pblock[k2];
+                            bbuf[1]=pblock[k2+8];
+                            inner_product(pa1[offseta1],bbuf,*c);
+                            bbuf[0]=pblock[k2+16];
+                            bbuf[1]=pblock[k2+24];
+                            inner_product(pa1[offseta2],bbuf,*c);
+                            k2+=32;
+                            bbuf[0]=pblock[k2];
+                            bbuf[1]=pblock[k2+8];
+                            inner_product(pa2[offseta1],bbuf,*c);
+                            bbuf[0]=pblock[k2+16];
+                            bbuf[1]=pblock[k2+24];
+                            inner_product(pa2[offseta2],bbuf,*c);
+                        }
+                    }   
+                }
+            }            
+        }
+    }
+
+    __device__ void Run_dq(FloatAB* a_block_buf,FloatAB* b_block_buf,float* c_thread_buf) const
+    {
+        using FloatAB2  = typename vector_type<FloatAB, 2>::type;
+        using FloatAB8  = typename vector_type<FloatAB, 8>::type;
+        constexpr index_t ks4=Gemm1NPerBlock/32;
+        constexpr index_t ks2=ks4/4+1;
+        constexpr index_t koff=256/ks2;
+        constexpr index_t moff=64/ks2;
+        const index_t warpid=threadIdx.x%64;
+        const index_t warp_idx=threadIdx.x/64;
+        const index_t half_warpid=warpid%32;
+        const index_t half_warpid64=half_warpid+128/ks2;
+        const index_t BStartIndex=warpid/32*4;
+        FloatAB *pb_block=b_block_buf+ warp_idx%ks4*4128;
+        a_block_buf+=warp_idx/ks4*256;
+        FloatAB2 abuf[8];
+        FloatAB8 *pa=(FloatAB8*)&(abuf[0]);
+        for(int k=0;k< KPerThread / KPack;k++) { 
+            for(int m0=0;m0< MRepeat;m0++) {
+                FloatAB8 *pa_block = (FloatAB8*)a_block_buf;
+                pa_block+=k*koff+m0*moff;
+                pa[0]=pa_block[half_warpid];
+                pa[1]=pa_block[half_warpid64];
+                float *cbuf = c_thread_buf +m0*16;
+                FloatAB* pblock = pb_block+k*128;
+                FloatAB2 bbuf;
+                for(int k1=0;k1<4;k1++){
+                    for(int m=0;m<4;m++){
+                        int k2=k1*8+BStartIndex+m;
+                        k2=k2%8+k2/8*1032;
+                        float *c = cbuf+m+4*k1;
+                        for(int n=0;n<8;n++){
+                            bbuf[0]=pblock[k2+16*n];
+                            bbuf[1]=pblock[k2+16*n+8];
+                            inner_product(abuf[n],bbuf,*c);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    __device__ void Run_ds(FloatAB* a_block_buf,FloatAB* b_block_buf,float* c_thread_buf) const
+    {
+        using FloatAB8  = typename vector_type<FloatAB, 8>::type;
+        const index_t warpid=threadIdx.x%64;
+        const index_t warp_idx=threadIdx.x/64;
+        const index_t half_warpid=warpid%32;
+        const index_t BStartIndex=warpid/32*4;
+        constexpr index_t offk=256/(Gemm1NPerBlock/128+1)+2;
+        constexpr index_t offk2=offk/2;
+        FloatAB8 *pa_block=(FloatAB8*)b_block_buf + threadIdx.x/64*32 +half_warpid;
+        FloatAB8 abuf[2];
+        #pragma unroll 1
+        for(int k=0;k< KPerThread / KPack;k++) {
+            abuf[0]=pa_block[k*258];
+            abuf[1]=pa_block[k*258+129];
+            for(int m0=0;m0< MRepeat;m0++) {
+                float *cbuf = c_thread_buf +m0*16;
+                FloatAB8* pblock=(FloatAB8*)a_block_buf+k*offk+m0*32;
+                FloatAB8 bbuf;
+                for(int k1=0;k1<4;k1++){
+                    for(int m=0;m<4;m++){
+                        int k2=k1*8+BStartIndex+m;
+                        float *c = cbuf+m+4*k1;
+                        bbuf=pblock[k2];
+                        inner_product(abuf[0],bbuf,*c);
+                        bbuf=pblock[k2+offk2];
+                        inner_product(abuf[1],bbuf,*c);
+                    }
+                }
+            }
+        }
+    }
+
+    __device__ void Run_dp(FloatAB* a_block_buf,FloatAB* b_block_buf,float* c_thread_buf) const
+    {
+        using FloatAB8  = typename vector_type<FloatAB, 8>::type;
+        const index_t warpid=threadIdx.x%64;
+        const index_t BStartIndex=warpid/32*4;
+        constexpr index_t offk=256/(Gemm1NPerBlock/128+1)+2;
+        constexpr index_t offk2=offk/2;
+        int *p=(int*)b_block_buf;
+        int abuf[KPerThread/2];
+        for(int i=0;i<KPerThread/2;i++){
+            abuf[i]=__shfl_xor(p[i],32);
+        }
+        FloatAB8 *pa1,*pa2;
+        if(warpid<32){
+            pa2=(FloatAB8*)&(abuf[0]);
+            pa1=(FloatAB8*)p;
+        }
+        else {
+            pa1=(FloatAB8*)&(abuf[0]);
+            pa2=(FloatAB8*)p;
+        }
+        for(int k=0;k< KPerThread / KPack;k++) { 
+            for(int m0=0;m0< MRepeat;m0++) {
+                float *cbuf = c_thread_buf +m0*16;
+                FloatAB8 *pblock=(FloatAB8*)a_block_buf+k*offk+m0*32;
+                FloatAB8 bbuf;
+                for(int k1=0;k1<4;k1++){
+                    for(int m=0;m<4;m++){
+                        int k2=k1*8+BStartIndex+m;
+                        float *c = cbuf+m+4*k1;
+                        bbuf=pblock[k2];
+                        inner_product(pa1[k],bbuf,*c);
+                        bbuf=pblock[k2+offk2];
+                        inner_product(pa2[k],bbuf,*c);
+                    }
+                }
+            }
+        }
+    }
 
     protected:
     // A[M0, M1, M2, KPack]

@@ -21,30 +21,30 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
 // EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include "flash_runner_hip.hpp"
+#include "flash_runner.hpp"
 
 template <>
-void FlashRunner::run_<FlashFwdBatchedParams, 128, device_gemm_trait::Float16,
-                       true, false>(FlashFwdBatchedParams &params,
+void FlashRunner::run_<FlashBwdBatchedParams, 32, device_gemm_trait::Float16,
+                       true, false>(FlashBwdBatchedParams &params,
                                     hipStream_t &stream) {
-  BOOL_SWITCH(BaseParams::kIsDeterministic, kIsDeterministic, [&] {
-    this->template run_fwd_<
-        FlashFwdBatchedParams, fwd_device_gemm::DeviceGemmBatchedHeadDim128,
+  // BOOL_SWITCH(BaseParams::kIsDeterministic, kIsDeterministic, [&] {
+    this->template run_bwd_<
+        FlashBwdBatchedParams, bwd_device_gemm::DeviceGemmBatchedHeadDim32,
         device_gemm_trait::Float16, device_gemm_trait::kGemmSpecPadding,
-        device_gemm_trait::kMaskingSpecDefault, kIsDeterministic>(params,
+        device_gemm_trait::kMaskingSpecDefault, false>(params,
                                                                   stream);
-  });        
+  // });
 } // FlashRunner::run_()
 
 template <>
-void FlashRunner::run_<FlashFwdBatchedParams, 128, device_gemm_trait::Float16,
-                       false, false>(FlashFwdBatchedParams &params,
+void FlashRunner::run_<FlashBwdBatchedParams, 32, device_gemm_trait::Float16,
+                       false, false>(FlashBwdBatchedParams &params,
                                      hipStream_t &stream) {
-  BOOL_SWITCH(BaseParams::kIsDeterministic, kIsDeterministic, [&] {
-    this->template run_fwd_<
-        FlashFwdBatchedParams, fwd_device_gemm::DeviceGemmBatchedHeadDim128,
+  // BOOL_SWITCH(BaseParams::kIsDeterministic, kIsDeterministic, [&] {
+    this->template run_bwd_<
+        FlashBwdBatchedParams, bwd_device_gemm::DeviceGemmBatchedHeadDim32,
         device_gemm_trait::Float16, device_gemm_trait::kGemmSpecDefault,
-        device_gemm_trait::kMaskingSpecDefault, kIsDeterministic>(params,
+        device_gemm_trait::kMaskingSpecDefault, false>(params,
                                                                   stream);
-  });    
+  // });
 } // FlashRunner::run_()
