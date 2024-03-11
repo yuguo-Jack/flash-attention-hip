@@ -34,7 +34,7 @@ target_compile_options(flashattn PRIVATE $<$<COMPILE_LANGUAGE:CXX>:
   -D__HIP_PLATFORM_HCC__=1
   --offload-arch=gfx906
   --offload-arch=gfx926
-  -D__gfx90a__
+  -D__gfx908__
   >)
 
 INSTALL(TARGETS flashattn
