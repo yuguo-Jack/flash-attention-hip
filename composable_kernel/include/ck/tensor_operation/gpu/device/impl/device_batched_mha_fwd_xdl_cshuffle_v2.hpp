@@ -85,7 +85,7 @@ __global__ void
             const unsigned long long seed,
             const unsigned long long offset,
             const index_t raw_m_padded,
-            const index_t raw_n_padded)
+            const index_t raw_n_padded) __attribute__((amdgpu_num_vgpr(128)))
 {
 #if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx908__) || defined(__gfx90a__) || \
     defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__))

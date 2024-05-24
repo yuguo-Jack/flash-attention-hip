@@ -52,7 +52,7 @@ __global__ void
             const uint8_t p_dropout_in_uint8_t,
             const GemmAccDataType p_dropout_rescale,
             const unsigned long long seed,
-            const unsigned long long offset)
+            const unsigned long long offset) __attribute__((amdgpu_num_vgpr(128)))
 {
 #if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx908__) || defined(__gfx90a__) || \
     defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__))

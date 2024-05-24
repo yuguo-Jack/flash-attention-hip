@@ -19,7 +19,7 @@
 
 #ifdef CK_USE_LAUNCH_BOUNDS
 // for most kernels
-#define CK_MAX_THREAD_PER_BLOCK 256
+#define CK_MAX_THREAD_PER_BLOCK 512
 #define CK_MIN_BLOCK_PER_CU 2
 
 // for wavelet GEMM kernel
@@ -98,24 +98,23 @@
 // buffer atomic add: integer
 #define CK_USE_AMD_BUFFER_ATOMIC_ADD_INTEGER 1
 
-#define CK_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 0
-/*
 // buffer atomic add: floating point
-#ifndef __HIP_DEVICE_COMPILE__ // for host code
-#define CK_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 1
-#elif defined(__gfx908__) || defined(__gfx90a__) || defined(__gfx940__) || defined(__gfx941__) || \
-    defined(__gfx942__) // for GPU code
-#define CK_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 1
-#else // for GPU code
 #define CK_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 0
-#endif
-*/
-#if(defined(__gfx90a__) || defined(__gfx940__) || defined(__gfx941__) || \
-    defined(__gfx942__)) // for GPU code
-#define CK_USE_AMD_BUFFER_ATOMIC_MAX_FLOAT64 1
-#else
-#define CK_USE_AMD_BUFFER_ATOMIC_MAX_FLOAT64 0
-#endif
+// #ifndef __HIP_DEVICE_COMPILE__ // for host code
+// #define CK_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 1
+// #elif defined(__gfx908__) || defined(__gfx90a__) || defined(__gfx940__) || defined(__gfx941__) || \
+//     defined(__gfx942__) // for GPU code
+// #define CK_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 1
+// #else // for GPU code
+// #define CK_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 0
+// #endif
+
+// #if(defined(__gfx90a__) || defined(__gfx940__) || defined(__gfx941__) || \
+//     defined(__gfx942__)) // for GPU code
+// #define CK_USE_AMD_BUFFER_ATOMIC_MAX_FLOAT64 1
+// #else
+// #define CK_USE_AMD_BUFFER_ATOMIC_MAX_FLOAT64 0
+// #endif
 
 // inline asm
 #define CK_USE_AMD_INLINE_ASM 1

@@ -1,4 +1,4 @@
-# CXX=hipcc cmake .. -DCMAKE_INSTALL_PREFIX=fa2_install
+# cmake .. -DCMAKE_CXX_COMPILER=${ROCM_PATH}/bin/hipcc -DAMDGPU_TARGETS=gfx928 -DCMAKE_INSTALL_PREFIX=fa2_install
 
 cmake_minimum_required(VERSION 3.9 FATAL_ERROR)
 project(flash-attention LANGUAGES CXX)
@@ -27,14 +27,17 @@ target_include_directories(flashattn PRIVATE
 target_link_libraries(flashattn PRIVATE hip::device)
 
 target_compile_options(flashattn PRIVATE $<$<COMPILE_LANGUAGE:CXX>:
-  -w
-  -Xcompiler="-fPIC"
-  -Xcompiler="-O3"
+  -Wno-deprecated-builtins
+  -Wno-deprecated
+  -DNDEBUG
+  -U__CUDA_NO_HALF_OPERATORS__
+  -U__CUDA_NO_HALF_CONVERSIONS__
+  -fPIC
+  -O3
   -std=c++17
   -D__HIP_PLATFORM_HCC__=1
-  --offload-arch=gfx906
-  --offload-arch=gfx926
-  -D__gfx908__
+  --offload-arch=gfx928
+  -D__gfx940__
   >)
 
 INSTALL(TARGETS flashattn

@@ -156,8 +156,8 @@ struct intrin_mfma_f32_16x16x16f16<16, 16>
     template <class FloatC>
     __device__ static void Run(const half4_t& reg_a, const half4_t& reg_b, FloatC& reg_c)
     {
-        reg_c.template AsType<float4_t>()(Number<0>{}) = __builtin_amdgcn_mfma_f32_16x16x16f16(
-            reg_a, reg_b, reg_c.template AsType<float4_t>()[Number<0>{}], 0, 0, 0);
+        asm volatile("\n s_nop 1 \n v_mmac_f32_16x16x16_f16 %0, %1, %2, %0" : 
+            "=v"(reg_c.template AsType<float4_t>()(Number<0>{})) : "v"(reg_a), "v"(reg_b), "0"(reg_c.template AsType<float4_t>()(Number<0>{})));
     }
 };
 
@@ -226,8 +226,8 @@ struct intrin_mfma_f32_16x16x16bf16_1k<16, 16>
     template <class FloatC>
     __device__ static void Run(const bhalf4_t& reg_a, const bhalf4_t& reg_b, FloatC& reg_c)
     {
-        reg_c.template AsType<float4_t>()(Number<0>{}) = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(
-            reg_a, reg_b, reg_c.template AsType<float4_t>()[Number<0>{}], 0, 0, 0);
+        asm volatile("\n s_nop 1 \n v_mmac_f32_16x16x16_bf16 %0, %1, %2, %0" : 
+            "=v"(reg_c.template AsType<float4_t>()(Number<0>{})) : "v"(reg_a), "v"(reg_b), "0"(reg_c.template AsType<float4_t>()(Number<0>{})));
     }
 };
 

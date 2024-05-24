@@ -398,7 +398,7 @@ struct FlashFwdGroupedParams : public GroupedParams {
       const Index h_q, const Index h_kv, const Index d, void * q,
       void * k, void * v, void * out,
       const void *cu_seqlens_q_d, const void *cu_seqlens_kv_d,
-      std::vector<void *> z_vec, void * softmax_lse,
+      void * z_vec, void * softmax_lse,
       const float p_dropout, const float softmax_scale, const bool is_causal,
       const bool return_softmax)
       : GroupedParams(b, max_seqlen_q, max_seqlen_kv, h_q, h_kv, d, q, k, v,
@@ -411,7 +411,7 @@ struct FlashFwdGroupedParams : public GroupedParams {
       if (return_softmax) {
         // z_vec.push_back(torch::empty({1, h_q, seqlens_q[i], seqlens_kv[i]},
         //                              opts.dtype(torch::kUInt8)));
-        z_ptrs.push_back(reinterpret_cast<void *>(z_vec[i]));
+        z_ptrs.push_back(nullptr);
       } else {
         z_ptrs.push_back(nullptr);
       }
@@ -436,7 +436,7 @@ struct FlashBwdGroupedParams : public GroupedParams {
       void * k, void * v, void * out,
       void * dout, void * dq, void * dk,
       void * dv, const void *cu_seqlens_q_d,
-      const void *cu_seqlens_kv_d, std::vector<void *> dsoftmax_vec,
+      const void *cu_seqlens_kv_d, void * dsoftmax_vec,
       void * softmax_lse, const float p_dropout,
       const float softmax_scale, const bool is_causal)
       : GroupedParams(b, max_seqlen_q, max_seqlen_kv, h_q, h_kv, d, q, k, v,
@@ -488,8 +488,7 @@ struct FlashBwdGroupedParams : public GroupedParams {
 
       // dsoftmax_vec.push_back(
       //     torch::empty({1, h_q, seqlens_q[i]}, opts.dtype(torch::kFloat32)));
-      dsoftmax_ptrs.push_back(
-          reinterpret_cast<void *>(dsoftmax_vec[i]));
+      dsoftmax_ptrs.push_back(reinterpret_cast<void *>(reinterpret_cast<float *>(dsoftmax_vec) + b * h_q * max_seqlen_q));
 
       // Z layout [b, h_q, max_seqlen_q, max_seqlen_kv]
       std::vector<Index> z_lengths =

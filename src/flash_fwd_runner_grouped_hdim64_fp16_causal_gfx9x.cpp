@@ -27,46 +27,26 @@ template <>
 void FlashRunner::run_<FlashFwdGroupedParams, 64, device_gemm_trait::Float16,
                        true, true>(FlashFwdGroupedParams &params,
                                    hipStream_t &stream) {
-  // if (params.is_dropout) {
-  //   BOOL_SWITCH(BaseParams::kIsDeterministic, kIsDeterministic, [&] {
+    BOOL_SWITCH(BaseParams::kIsDeterministic, kIsDeterministic, [&] {
       this->template run_fwd_<
           FlashFwdGroupedParams, fwd_device_gemm::DeviceGemmGroupedHeadDim64,
           device_gemm_trait::Float16, device_gemm_trait::kGemmSpecPadding,
-          device_gemm_trait::kMaskingSpecCausal, false>(params,
+          device_gemm_trait::kMaskingSpecCausal, kIsDeterministic>(params,
                                                                    stream);
-  //   });
-  // } else {
-  //   BOOL_SWITCH(BaseParams::kIsDeterministic, kIsDeterministic, [&] {
-  //     this->template run_fwd_<
-  //         FlashFwdGroupedParams,
-  //         fwd_device_gemm::DeviceGemmGroupedHeadDim64NonDrop,
-  //         device_gemm_trait::Float16, device_gemm_trait::kGemmSpecPadding,
-  //         device_gemm_trait::kMaskingSpecCausal, kIsDeterministic>(params,
-  //                                                                  stream);
-  //   });
-  // }
+    });
+
 } // FlashRunner::run_()
 
 template <>
 void FlashRunner::run_<FlashFwdGroupedParams, 64, device_gemm_trait::Float16,
                        false, true>(FlashFwdGroupedParams &params,
                                     hipStream_t &stream) {
-  // if (params.is_dropout) {
-  //   BOOL_SWITCH(BaseParams::kIsDeterministic, kIsDeterministic, [&] {
+    BOOL_SWITCH(BaseParams::kIsDeterministic, kIsDeterministic, [&] {
       this->template run_fwd_<
           FlashFwdGroupedParams, fwd_device_gemm::DeviceGemmGroupedHeadDim64,
           device_gemm_trait::Float16, device_gemm_trait::kGemmSpecDefault,
-          device_gemm_trait::kMaskingSpecCausal, false>(params,
+          device_gemm_trait::kMaskingSpecCausal, kIsDeterministic>(params,
                                                                    stream);
-  //   });
-  // } else {
-  //   BOOL_SWITCH(BaseParams::kIsDeterministic, kIsDeterministic, [&] {
-  //     this->template run_fwd_<
-  //         FlashFwdGroupedParams,
-  //         fwd_device_gemm::DeviceGemmGroupedHeadDim64NonDrop,
-  //         device_gemm_trait::Float16, device_gemm_trait::kGemmSpecDefault,
-  //         device_gemm_trait::kMaskingSpecCausal, kIsDeterministic>(params,
-  //                                                                  stream);
-  //   });
-  // }
+    });
+
 } // FlashRunner::run_()

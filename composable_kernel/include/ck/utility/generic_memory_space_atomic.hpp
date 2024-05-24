@@ -71,6 +71,40 @@ __device__ double2_t atomic_add<double2_t>(double2_t* p_dst, const double2_t& x)
     return vy.template AsType<double2_t>()[I0];
 }
 
+union U32F162_ADDR
+{
+    uint32_t* u32_a;
+    half2_t* f162_a;
+};
+
+union U32F162
+{
+    uint32_t u32;
+    half2_t f162;
+};
+
+template <>
+__device__ half2_t atomic_add<half2_t>(half2_t* p_dst, const half2_t& x)
+{
+    U32F162_ADDR dword_addr;
+    U32F162 cur_v;
+    U32F162 new_;
+    uint32_t old_v, new_v;
+    dword_addr.f162_a = p_dst;
+    cur_v.u32          = *dword_addr.u32_a;
+
+    do
+    {
+        old_v      = cur_v.u32;
+        new_.f162[0] = cur_v.f162[0]+x[0];
+        new_.f162[1] = cur_v.f162[1]+x[1];
+        new_v      = new_.u32;
+        cur_v.u32  = atomicCAS(dword_addr.u32_a, old_v, new_v);
+    } while(cur_v.u32 != old_v);
+
+    return x;
+}
+
 inline __host__ __device__ bhalf_t add_bf16_t(const bhalf_t& a, const bhalf_t& b)
 {
     return type_convert<bhalf_t>(type_convert<float>(a) + type_convert<float>(b));
@@ -110,40 +144,6 @@ __device__ bhalf2_t atomic_add<bhalf2_t>(bhalf2_t* p_dst, const bhalf2_t& x)
     {
         old_v      = cur_v.u32;
         new_.bf162 = add_bf16x2_t(cur_v.bf162, x);
-        new_v      = new_.u32;
-        cur_v.u32  = atomicCAS(dword_addr.u32_a, old_v, new_v);
-    } while(cur_v.u32 != old_v);
-
-    return x;
-}
-
-union U32F162_ADDR
-{
-    uint32_t* u32_a;
-    half2_t* f162_a;
-};
-
-union U32F162
-{
-    uint32_t u32;
-    half2_t f162;
-};
-
-template <>
-__device__ half2_t atomic_add<half2_t>(half2_t* p_dst, const half2_t& x)
-{
-    U32F162_ADDR dword_addr;
-    U32F162 cur_v;
-    U32F162 new_;
-    uint32_t old_v, new_v;
-    dword_addr.f162_a = p_dst;
-    cur_v.u32          = *dword_addr.u32_a;
-
-    do
-    {
-        old_v      = cur_v.u32;
-        new_.f162[0] = cur_v.f162[0]+x[0];
-        new_.f162[1] = cur_v.f162[1]+x[1];
         new_v      = new_.u32;
         cur_v.u32  = atomicCAS(dword_addr.u32_a, old_v, new_v);
     } while(cur_v.u32 != old_v);
