@@ -163,12 +163,11 @@ bool flash_attn_fwd(const void * const q,
     FLASHATTNLIB_BEGIN_FUNC
     const bool is_dropout = p_dropout > 0.0;
     CHECK_FWD_EXECTUABLE(seqlen_q, seqlen_k)
-    ASSERT_CHECK(is_bf16 == false);
 
     FlashFwdBatchedParams params(batch_size, seqlen_q, seqlen_k, num_heads,
                                 num_heads_k, head_size, const_cast<void *>(q), const_cast<void *>(k),
                                 const_cast<void *>(v), out, softmax_ptr, softmax_lse_ptr, 
-                                p_dropout, softmax_scale, is_causal, return_softmax);
+                                p_dropout, softmax_scale, is_causal, return_softmax, is_bf16);
 
     if (is_dropout) {
         auto philox_args = at::PhiloxCudaState(seed, offset);
@@ -216,13 +215,12 @@ bool flash_attn_varlen_fwd(const void * const q,
     FLASHATTNLIB_BEGIN_FUNC
     const bool is_dropout = p_dropout > 0.0;
     CHECK_FWD_EXECTUABLE(max_seqlen_q, max_seqlen_k)
-    ASSERT_CHECK(is_bf16 == false);
     ASSERT_CHECK(return_softmax == false);
     
     FlashFwdGroupedParams params(batch_size, max_seqlen_q, max_seqlen_k, num_heads, num_heads_k,
                                 head_size, const_cast<void *>(q), const_cast<void *>(k), const_cast<void *>(v), out, cu_seqlens_q,
                                 cu_seqlens_k, softmax_ptr, softmax_lse_ptr, p_dropout, softmax_scale,
-                                is_causal, return_softmax);
+                                is_causal, return_softmax, is_bf16);
 
     if (is_dropout) {
         auto philox_args = at::PhiloxCudaState(seed, offset);
@@ -271,7 +269,6 @@ bool flash_attn_bwd(const void * const dout,
     FLASHATTNLIB_BEGIN_FUNC
     const bool is_dropout = p_dropout > 0.0;
     CHECK_BWD_EXECTUABLE(seqlen_q, seqlen_k)
-    ASSERT_CHECK(is_bf16 == false);
 
     hipMemset(dq, 0, sizeof(half) * batch_size * seqlen_q * num_heads * head_size);
     // hipMemset(dk, 0, sizeof(half) * batch_size * seqlen_k * num_heads_k * head_size);
@@ -287,7 +284,7 @@ bool flash_attn_bwd(const void * const dout,
       dq, // dq is padded
       dk, // dk is padded
       dv, // dv is padded
-      const_cast<void *>(softmax_d), const_cast<void *>(softmax_lse), p_dropout, softmax_scale, is_causal);
+      const_cast<void *>(softmax_d), const_cast<void *>(softmax_lse), p_dropout, softmax_scale, is_causal, is_bf16);
 
     if (is_dropout) {
       auto philox_args = at::PhiloxCudaState(seed, offset);
@@ -353,14 +350,13 @@ bool flash_attn_varlen_bwd(const void * const dout,
     FLASHATTNLIB_BEGIN_FUNC
     const bool is_dropout = p_dropout > 0.0;
     CHECK_BWD_EXECTUABLE(max_seqlen_q, max_seqlen_k)
-    ASSERT_CHECK(is_bf16 == false);
 
     hipMemset(dq, 0, sizeof(half) * batch_size * max_seqlen_q * num_heads * head_size);
     hipMemset(dk, 0, sizeof(half) * batch_size * max_seqlen_k * num_heads_k * head_size);
     hipMemset(dv, 0, sizeof(half) * batch_size * max_seqlen_k * num_heads_k * head_size);
 
     FlashBwdGroupedParams params(
-      batch_size, max_seqlen_q, max_seqlen_k, num_heads, num_heads,
+      batch_size, max_seqlen_q, max_seqlen_k, num_heads, num_heads_k,
       head_size,
       const_cast<void *>(q), // q is padded
       const_cast<void *>(k), // k is padded
@@ -371,7 +367,7 @@ bool flash_attn_varlen_bwd(const void * const dout,
       dk, // dk is padded
       dv, // dv is padded
       cu_seqlens_q, cu_seqlens_k, const_cast<void *>(softmax_d),
-      const_cast<void *>(softmax_lse), p_dropout, softmax_scale, is_causal);
+      const_cast<void *>(softmax_lse), p_dropout, softmax_scale, is_causal, is_bf16);
 
     if (is_dropout) {
       auto philox_args = at::PhiloxCudaState(seed, offset);
