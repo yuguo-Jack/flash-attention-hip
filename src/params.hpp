@@ -409,9 +409,14 @@ struct FlashFwdGroupedParams : public GroupedParams {
                       p_dropout, softmax_scale, is_causal, is_bf16) {
     for (int i = 0; i < b; ++i) {
       if (return_softmax) {
+        if (is_bf16) {
+          z_ptrs.push_back(nullptr);
+        } else {
+          z_ptrs.push_back(reinterpret_cast<void *>(reinterpret_cast<half *>(z_vec) + i * h_q * max_seqlen_q * max_seqlen_kv));
+        }
         // z_vec.push_back(torch::empty({1, h_q, seqlens_q[i], seqlens_kv[i]},
         //                              opts.dtype(torch::kUInt8)));
-        z_ptrs.push_back(nullptr);
+        // z_ptrs.push_back(nullptr);
       } else {
         z_ptrs.push_back(nullptr);
       }
@@ -488,7 +493,7 @@ struct FlashBwdGroupedParams : public GroupedParams {
 
       // dsoftmax_vec.push_back(
       //     torch::empty({1, h_q, seqlens_q[i]}, opts.dtype(torch::kFloat32)));
-      dsoftmax_ptrs.push_back(reinterpret_cast<void *>(reinterpret_cast<float *>(dsoftmax_vec) + b * h_q * max_seqlen_q));
+      dsoftmax_ptrs.push_back(reinterpret_cast<void *>(reinterpret_cast<float *>(dsoftmax_vec) + i * h_q * max_seqlen_q));
 
       // Z layout [b, h_q, max_seqlen_q, max_seqlen_kv]
       std::vector<Index> z_lengths =

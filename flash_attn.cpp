@@ -215,7 +215,7 @@ bool flash_attn_varlen_fwd(const void * const q,
     FLASHATTNLIB_BEGIN_FUNC
     const bool is_dropout = p_dropout > 0.0;
     CHECK_FWD_EXECTUABLE(max_seqlen_q, max_seqlen_k)
-    ASSERT_CHECK(return_softmax == false);
+    ASSERT_CHECK((return_softmax == false) || (is_bf16 == false));
     
     FlashFwdGroupedParams params(batch_size, max_seqlen_q, max_seqlen_k, num_heads, num_heads_k,
                                 head_size, const_cast<void *>(q), const_cast<void *>(k), const_cast<void *>(v), out, cu_seqlens_q,
@@ -225,6 +225,8 @@ bool flash_attn_varlen_fwd(const void * const q,
     if (is_dropout) {
         auto philox_args = at::PhiloxCudaState(seed, offset);
         params.seeds = at::cuda::philox::unpack(philox_args);
+        auto rng_state_ptr = reinterpret_cast<uint64_t *>(rng_state);
+        std::tie(rng_state_ptr[0], rng_state_ptr[1]) = params.seeds;
     }
 
     run_mha_varlen_fwd(params, stream);
