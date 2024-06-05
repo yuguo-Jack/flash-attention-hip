@@ -39,10 +39,10 @@ struct BaseParams {
                       const Index kvseq_stride, const Index outseq_stride, const Index qhead_stride,
                       const Index kvhead_stride, const Index outhead_stride, const Index softmaxlse_batch_stride,
                       const float p_dropout, const float softmax_scale,
-                      const bool is_causal)
+                      const bool is_causal, const bool is_bf16)
       : b(b), max_seqlen_q(max_seqlen_q), max_seqlen_kv(max_seqlen_kv),
         h_q(h_q), h_kv(h_kv), d(d), p_dropout(p_dropout),
-        softmax_scale(softmax_scale), is_bf16(false),
+        softmax_scale(softmax_scale), is_bf16(is_bf16),
         is_dropout(p_dropout > 0.0f), is_mnko_padding(false),
         is_causal(is_causal), q_seq_stride(qseq_stride),
         kv_seq_stride(kvseq_stride), out_seq_stride(outseq_stride),
@@ -104,9 +104,9 @@ struct BatchedParams : public BaseParams {
       const Index qseq_stride, const Index kvseq_stride, const Index outseq_stride, 
       const Index qhead_stride, const Index kvhead_stride, const Index outhead_stride, 
       const Index softmaxlse_batch_stride,
-      const float p_dropout, const float softmax_scale, const bool is_causal)
+      const float p_dropout, const float softmax_scale, const bool is_causal, const bool is_bf16)
       : BaseParams(b, max_seqlen_q, max_seqlen_kv, h_q, h_kv, d, qseq_stride, kvseq_stride, outseq_stride, qhead_stride, 
-                  kvhead_stride, outhead_stride, softmaxlse_batch_stride, p_dropout, softmax_scale, is_causal),
+                  kvhead_stride, outhead_stride, softmaxlse_batch_stride, p_dropout, softmax_scale, is_causal, is_bf16),
         q_ptr(q), k_ptr(k), v_ptr(v),
         out_ptr(out), softmax_lse_ptr(softmax_lse),
         q_batch_stride(qbatch_stride), kv_batch_stride(kvbatch_stride),
@@ -192,11 +192,11 @@ struct FlashFwdBatchedParams : public BatchedParams {
       void * z,
       void * softmax_lse, // TODO: forward reference, backward const reference
       const float p_dropout, const float softmax_scale, const bool is_causal,
-      const bool return_softmax)
+      const bool return_softmax, const bool is_bf16)
       : BatchedParams(b, max_seqlen_q, max_seqlen_kv, h_q, h_kv, d, q, k, v,
                       out, softmax_lse, max_seqlen_q * h_q * d, max_seqlen_kv * h_kv * d, max_seqlen_q * h_q * d,
                       h_q * d, h_kv * d, h_q * d, d, d,
-                      d, max_seqlen_q * h_q, p_dropout, softmax_scale, is_causal) {
+                      d, max_seqlen_q * h_q, p_dropout, softmax_scale, is_causal, is_bf16) {
     z_ptr = return_softmax ? z : nullptr;
 
     // Z layout [b, h_q, max_seqlen_q, max_seqlen_kv]
@@ -218,17 +218,17 @@ struct FlashBwdBatchedParams : public BatchedParams {
       void * dout, void * dq, void * dk,
       void * dv, void * dsoftmax,
       void * softmax_lse, // TODO: Fix constness
-      const float p_dropout, const float softmax_scale, const bool is_causal)
+      const float p_dropout, const float softmax_scale, const bool is_causal, const bool is_bf16)
       : BatchedParams(b, max_seqlen_q, max_seqlen_kv, h_q, h_kv, d, q, k, v,
                       out, softmax_lse, max_seqlen_q * h_q * d, max_seqlen_kv * h_kv * d, max_seqlen_q * h_q * d,
                       h_q * d, h_kv * d, h_q * d, d, d,
-                      d, max_seqlen_q * h_q, p_dropout, softmax_scale, is_causal),
+                      d, max_seqlen_q * h_q, p_dropout, softmax_scale, is_causal, is_bf16),
         dq_ptr(dq), dk_ptr(dk), dv_ptr(dv),
         dout_ptr(dout), dsoftmax_ptr(dsoftmax) {
     z_ptr = nullptr;
 
-    Index dkv_batch_stride = max_seqlen_kv * h_kv * d;
-    Index dkv_seq_stride = h_kv * d;
+    Index dkv_batch_stride = max_seqlen_kv * h_q * d; // GQA
+    Index dkv_seq_stride = h_q * d;
     Index dq_seq_stride = h_q * d;
     Index dout_seq_stride = h_q * d;
     Index dkv_head_stride = d;
@@ -285,9 +285,9 @@ struct GroupedParams : public BaseParams {
                          const Index qhead_stride, const Index kvhead_stride, const Index outhead_stride, 
                          const Index softmaxlse_batch_stride,
                          const float p_dropout,
-                         const float softmax_scale, const bool is_causal)
+                         const float softmax_scale, const bool is_causal, const bool is_bf16)
       : BaseParams(b, max_seqlen_q, max_seqlen_kv, h_q, h_kv, d, qseq_stride, kvseq_stride, outseq_stride, qhead_stride, 
-                  kvhead_stride, outhead_stride, softmaxlse_batch_stride, p_dropout, softmax_scale, is_causal),
+                  kvhead_stride, outhead_stride, softmaxlse_batch_stride, p_dropout, softmax_scale, is_causal, is_bf16),
         seqlens_q(
             get_host_seqlens(static_cast<const int *>(cu_seqlens_q_d), b)),
         seqlens_kv(
@@ -398,20 +398,25 @@ struct FlashFwdGroupedParams : public GroupedParams {
       const Index h_q, const Index h_kv, const Index d, void * q,
       void * k, void * v, void * out,
       const void *cu_seqlens_q_d, const void *cu_seqlens_kv_d,
-      std::vector<void *> z_vec, void * softmax_lse,
+      void * z_vec, void * softmax_lse,
       const float p_dropout, const float softmax_scale, const bool is_causal,
-      const bool return_softmax)
+      const bool return_softmax, const bool is_bf16)
       : GroupedParams(b, max_seqlen_q, max_seqlen_kv, h_q, h_kv, d, q, k, v,
                       out, cu_seqlens_q_d, cu_seqlens_kv_d, softmax_lse,
                       max_seqlen_q * h_q * d, max_seqlen_kv * h_kv * d, max_seqlen_q * h_q * d,
                       h_q * d, h_kv * d, h_q * d, d, d,
                       d, max_seqlen_q * h_q,
-                      p_dropout, softmax_scale, is_causal) {
+                      p_dropout, softmax_scale, is_causal, is_bf16) {
     for (int i = 0; i < b; ++i) {
       if (return_softmax) {
+        if (is_bf16) {
+          z_ptrs.push_back(nullptr);
+        } else {
+          z_ptrs.push_back(reinterpret_cast<void *>(reinterpret_cast<half *>(z_vec) + i * h_q * max_seqlen_q * max_seqlen_kv));
+        }
         // z_vec.push_back(torch::empty({1, h_q, seqlens_q[i], seqlens_kv[i]},
         //                              opts.dtype(torch::kUInt8)));
-        z_ptrs.push_back(reinterpret_cast<void *>(z_vec[i]));
+        // z_ptrs.push_back(nullptr);
       } else {
         z_ptrs.push_back(nullptr);
       }
@@ -436,15 +441,15 @@ struct FlashBwdGroupedParams : public GroupedParams {
       void * k, void * v, void * out,
       void * dout, void * dq, void * dk,
       void * dv, const void *cu_seqlens_q_d,
-      const void *cu_seqlens_kv_d, std::vector<void *> dsoftmax_vec,
+      const void *cu_seqlens_kv_d, void * dsoftmax_vec,
       void * softmax_lse, const float p_dropout,
-      const float softmax_scale, const bool is_causal)
+      const float softmax_scale, const bool is_causal, const bool is_bf16)
       : GroupedParams(b, max_seqlen_q, max_seqlen_kv, h_q, h_kv, d, q, k, v,
                       out, cu_seqlens_q_d, cu_seqlens_kv_d, softmax_lse,
                       max_seqlen_q * h_q * d, max_seqlen_kv * h_kv * d, max_seqlen_q * h_q * d,
                       h_q * d, h_kv * d, h_q * d, d, d,
                       d, max_seqlen_q * h_q,
-                      p_dropout, softmax_scale, is_causal),
+                      p_dropout, softmax_scale, is_causal, is_bf16),
         bwd_out_ptrs(
             std::vector<const void *>(out_ptrs.begin(), out_ptrs.end())),
         bwd_softmax_lse_ptrs(std::vector<const void *>(
@@ -456,7 +461,7 @@ struct FlashBwdGroupedParams : public GroupedParams {
     char *dout_ptr = reinterpret_cast<char *>(dout);
 
     Index dq_seq_stride = h_q * d;
-    Index dkv_seq_stride = h_kv * d;
+    Index dkv_seq_stride = h_q * d; // GQA
     Index dout_seq_stride = h_q * d;
     Index dq_head_stride = d;
     Index dkv_head_stride = d;
@@ -488,8 +493,7 @@ struct FlashBwdGroupedParams : public GroupedParams {
 
       // dsoftmax_vec.push_back(
       //     torch::empty({1, h_q, seqlens_q[i]}, opts.dtype(torch::kFloat32)));
-      dsoftmax_ptrs.push_back(
-          reinterpret_cast<void *>(dsoftmax_vec[i]));
+      dsoftmax_ptrs.push_back(reinterpret_cast<void *>(reinterpret_cast<float *>(dsoftmax_vec) + i * h_q * max_seqlen_q));
 
       // Z layout [b, h_q, max_seqlen_q, max_seqlen_kv]
       std::vector<Index> z_lengths =
