@@ -273,8 +273,8 @@ bool flash_attn_bwd(const void * const dout,
     CHECK_BWD_EXECTUABLE(seqlen_q, seqlen_k)
 
     hipMemset(dq, 0, sizeof(half) * batch_size * seqlen_q * num_heads * head_size);
-    // hipMemset(dk, 0, sizeof(half) * batch_size * seqlen_k * num_heads_k * head_size);
-    // hipMemset(dv, 0, sizeof(half) * batch_size * seqlen_k * num_heads_k * head_size);
+    // hipMemset(dk, 0, sizeof(half) * batch_size * seqlen_k * num_heads * head_size);
+    // hipMemset(dv, 0, sizeof(half) * batch_size * seqlen_k * num_heads * head_size);
 
     FlashBwdBatchedParams params(
       batch_size, seqlen_q, seqlen_k, num_heads, num_heads_k, head_size,
@@ -300,13 +300,13 @@ bool flash_attn_bwd(const void * const dout,
     // printTensor<half>("******* dout: ", static_cast<half*>(params.dout_ptr), batch_size, seqlen_q, num_heads, head_size);
     // printTensor<float>("******* softmax_d: ", static_cast<float*>(params.dsoftmax_ptr), batch_size, seqlen_q, num_heads, 1);
     // printTensor<half>("******* dQ: ", static_cast<half*>(params.dq_ptr), batch_size, seqlen_q, num_heads, head_size);
-    // printTensor<half>("******* dK: ", static_cast<half*>(params.dk_ptr), batch_size, seqlen_k, num_heads_k, head_size);
-    // printTensor<half>("******* dV: ", static_cast<half*>(params.dv_ptr), batch_size, seqlen_k, num_heads_k, head_size);
+    // printTensor<half>("******* dK: ", static_cast<half*>(params.dk_ptr), batch_size, seqlen_k, num_heads, head_size);
+    // printTensor<half>("******* dV: ", static_cast<half*>(params.dv_ptr), batch_size, seqlen_k, num_heads, head_size);
     // printTensor<float>("******* softmax_lse: ", static_cast<float*>(params.softmax_lse_ptr), batch_size, seqlen_q, num_heads, 1);
     run_mha_bwd(params, stream);
     // printTensor<half>("******* dQ after fa: ", static_cast<half*>(params.dq_ptr), batch_size, seqlen_q, num_heads, head_size);
-    // printTensor<half>("******* dK after fa: ", static_cast<half*>(params.dk_ptr), batch_size, seqlen_k, num_heads_k, head_size);
-    // printTensor<half>("******* dV after fa: ", static_cast<half*>(params.dv_ptr), batch_size, seqlen_k, num_heads_k, head_size);
+    // printTensor<half>("******* dK after fa: ", static_cast<half*>(params.dk_ptr), batch_size, seqlen_k, num_heads, head_size);
+    // printTensor<half>("******* dV after fa: ", static_cast<half*>(params.dv_ptr), batch_size, seqlen_k, num_heads, head_size);
     // printTensor<float>("******* softmax_d after fa: ", static_cast<float*>(params.dsoftmax_ptr), batch_size, seqlen_q, num_heads, 1);
     
     return true;
@@ -354,8 +354,8 @@ bool flash_attn_varlen_bwd(const void * const dout,
     CHECK_BWD_EXECTUABLE(max_seqlen_q, max_seqlen_k)
 
     hipMemset(dq, 0, sizeof(half) * batch_size * max_seqlen_q * num_heads * head_size);
-    hipMemset(dk, 0, sizeof(half) * batch_size * max_seqlen_k * num_heads_k * head_size);
-    hipMemset(dv, 0, sizeof(half) * batch_size * max_seqlen_k * num_heads_k * head_size);
+    hipMemset(dk, 0, sizeof(half) * batch_size * max_seqlen_k * num_heads * head_size);
+    hipMemset(dv, 0, sizeof(half) * batch_size * max_seqlen_k * num_heads * head_size);
 
     FlashBwdGroupedParams params(
       batch_size, max_seqlen_q, max_seqlen_k, num_heads, num_heads_k,
@@ -380,13 +380,13 @@ bool flash_attn_varlen_bwd(const void * const dout,
     // printTensor<half>("******* dout: ", static_cast<half*>(const_cast<void*>(params.dout_ptrs[0])), batch_size, max_seqlen_q, num_heads, head_size);
     // printTensor<float>("******* softmax_d: ", static_cast<float*>(params.dsoftmax_ptrs[0]), batch_size, max_seqlen_q, num_heads, 1);
     // printTensor<half>("******* dQ: ", static_cast<half*>(params.dq_ptrs[0]), batch_size, max_seqlen_q, num_heads, head_size);
-    // printTensor<half>("******* dK: ", static_cast<half*>(params.dk_ptrs[0]), batch_size, max_seqlen_k, num_heads_k, head_size);
-    // printTensor<half>("******* dV: ", static_cast<half*>(params.dv_ptrs[0]), batch_size, max_seqlen_k, num_heads_k, head_size);
+    // printTensor<half>("******* dK: ", static_cast<half*>(params.dk_ptrs[0]), batch_size, max_seqlen_k, num_heads, head_size);
+    // printTensor<half>("******* dV: ", static_cast<half*>(params.dv_ptrs[0]), batch_size, max_seqlen_k, num_heads, head_size);
     // printTensor<float>("******* softmax_lse: ", static_cast<float*>(const_cast<void*>(params.bwd_softmax_lse_ptrs[0])), batch_size, max_seqlen_q, num_heads, 1);
     run_mha_varlen_bwd(params, stream);
     // printTensor<half>("******* dQ after fa: ", static_cast<half*>(params.dq_ptrs[0]), batch_size, max_seqlen_q, num_heads, head_size);
-    // printTensor<half>("******* dK after fa: ", static_cast<half*>(params.dk_ptrs[0]), batch_size, max_seqlen_k, num_heads_k, head_size);
-    // printTensor<half>("******* dV after fa: ", static_cast<half*>(params.dv_ptrs[0]), batch_size, max_seqlen_k, num_heads_k, head_size);
+    // printTensor<half>("******* dK after fa: ", static_cast<half*>(params.dk_ptrs[0]), batch_size, max_seqlen_k, num_heads, head_size);
+    // printTensor<half>("******* dV after fa: ", static_cast<half*>(params.dv_ptrs[0]), batch_size, max_seqlen_k, num_heads, head_size);
     // printTensor<float>("******* softmax_d after fa: ", static_cast<float*>(params.dsoftmax_ptrs[0]), batch_size, max_seqlen_q, num_heads, 1);
     
     return true;

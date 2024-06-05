@@ -57,12 +57,12 @@ __device__ void print_shared(T const* p_shared, index_t num_elements)
 
     __syncthreads();
 
-    if(tid == 0)
+    if(tid == 0 && wgid == 1)
     {
-        printf("\nWorkgroup id %d, bytes per row %d, element stride %d\n\n",
+        printf("\nWorkgroup id %d, bytes per row %d, element stride %d, num_elements %d\n\n",
                wgid,
                row_bytes,
-               element_stride);
+               element_stride, num_elements);
         for(index_t i = 0; i < num_elements; i += row_elements)
         {
             printf("elem %5d: ", i);

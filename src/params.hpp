@@ -227,8 +227,8 @@ struct FlashBwdBatchedParams : public BatchedParams {
         dout_ptr(dout), dsoftmax_ptr(dsoftmax) {
     z_ptr = nullptr;
 
-    Index dkv_batch_stride = max_seqlen_kv * h_kv * d;
-    Index dkv_seq_stride = h_kv * d;
+    Index dkv_batch_stride = max_seqlen_kv * h_q * d; // GQA
+    Index dkv_seq_stride = h_q * d;
     Index dq_seq_stride = h_q * d;
     Index dout_seq_stride = h_q * d;
     Index dkv_head_stride = d;
@@ -461,7 +461,7 @@ struct FlashBwdGroupedParams : public GroupedParams {
     char *dout_ptr = reinterpret_cast<char *>(dout);
 
     Index dq_seq_stride = h_q * d;
-    Index dkv_seq_stride = h_kv * d;
+    Index dkv_seq_stride = h_q * d; // GQA
     Index dout_seq_stride = h_q * d;
     Index dq_head_stride = d;
     Index dkv_head_stride = d;
