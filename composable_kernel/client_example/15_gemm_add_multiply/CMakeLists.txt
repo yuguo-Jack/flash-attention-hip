@@ -1,3 +1,0 @@
-
-add_executable(client_gemm_add_multiply gemm_add_multiply.cpp)
-target_link_libraries(client_gemm_add_multiply PRIVATE composable_kernel::device_operations)
