@@ -30,8 +30,8 @@ target_compile_options(flashattn PRIVATE $<$<COMPILE_LANGUAGE:CXX>:
   -Wno-deprecated-builtins
   -Wno-deprecated
   -DNDEBUG
-  -U__CUDA_NO_HALF_OPERATORS__
-  -U__CUDA_NO_HALF_CONVERSIONS__
+  -U__HIP_NO_HALF_OPERATORS__
+  -U__HIP_NO_HALF_CONVERSIONS__
   -fPIC
   -O3
   -std=c++17
