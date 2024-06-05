@@ -168,7 +168,7 @@ bool flash_attn_fwd(const void * const q,
     FlashFwdBatchedParams params(batch_size, seqlen_q, seqlen_k, num_heads,
                                 num_heads_k, head_size, const_cast<void *>(q), const_cast<void *>(k),
                                 const_cast<void *>(v), out, softmax_ptr, softmax_lse_ptr, 
-                                p_dropout, softmax_scale, is_causal, return_softmax);
+                                p_dropout, softmax_scale, is_causal, return_softmax, is_bf16);
 
     if (is_dropout) {
         auto philox_args = at::PhiloxCudaState(seed, offset);
@@ -217,16 +217,17 @@ bool flash_attn_varlen_fwd(const void * const q,
     const bool is_dropout = p_dropout > 0.0;
     CHECK_FWD_EXECTUABLE(max_seqlen_q, max_seqlen_k)
     ASSERT_CHECK(is_bf16 == false);
-    ASSERT_CHECK(return_softmax == false);
     
     FlashFwdGroupedParams params(batch_size, max_seqlen_q, max_seqlen_k, num_heads, num_heads_k,
                                 head_size, const_cast<void *>(q), const_cast<void *>(k), const_cast<void *>(v), out, cu_seqlens_q,
-                                cu_seqlens_k, std::vector<void*>(), softmax_lse_ptr, p_dropout, softmax_scale,
-                                is_causal, return_softmax);
+                                cu_seqlens_k, softmax_ptr, softmax_lse_ptr, p_dropout, softmax_scale,
+                                is_causal, return_softmax, is_bf16);
 
     if (is_dropout) {
         auto philox_args = at::PhiloxCudaState(seed, offset);
         params.seeds = at::cuda::philox::unpack(philox_args);
+        auto rng_state_ptr = reinterpret_cast<uint64_t *>(rng_state);
+        std::tie(rng_state_ptr[0], rng_state_ptr[1]) = params.seeds;
     }
 
     run_mha_varlen_fwd(params, stream);
@@ -274,8 +275,8 @@ bool flash_attn_bwd(const void * const dout,
     ASSERT_CHECK(is_bf16 == false);
 
     hipMemset(dq, 0, sizeof(half) * batch_size * seqlen_q * num_heads * head_size);
-    // hipMemset(dk, 0, sizeof(half) * batch_size * seqlen_k * num_heads_k * head_size);
-    // hipMemset(dv, 0, sizeof(half) * batch_size * seqlen_k * num_heads_k * head_size);
+    // hipMemset(dk, 0, sizeof(half) * batch_size * seqlen_k * num_heads * head_size);
+    // hipMemset(dv, 0, sizeof(half) * batch_size * seqlen_k * num_heads * head_size);
 
     FlashBwdBatchedParams params(
       batch_size, seqlen_q, seqlen_k, num_heads, num_heads_k, head_size,
@@ -287,7 +288,7 @@ bool flash_attn_bwd(const void * const dout,
       dq, // dq is padded
       dk, // dk is padded
       dv, // dv is padded
-      const_cast<void *>(softmax_d), const_cast<void *>(softmax_lse), p_dropout, softmax_scale, is_causal);
+      const_cast<void *>(softmax_d), const_cast<void *>(softmax_lse), p_dropout, softmax_scale, is_causal, is_bf16);
 
     if (is_dropout) {
       auto philox_args = at::PhiloxCudaState(seed, offset);
@@ -301,13 +302,13 @@ bool flash_attn_bwd(const void * const dout,
     // printTensor<half>("******* dout: ", static_cast<half*>(params.dout_ptr), batch_size, seqlen_q, num_heads, head_size);
     // printTensor<float>("******* softmax_d: ", static_cast<float*>(params.dsoftmax_ptr), batch_size, seqlen_q, num_heads, 1);
     // printTensor<half>("******* dQ: ", static_cast<half*>(params.dq_ptr), batch_size, seqlen_q, num_heads, head_size);
-    // printTensor<half>("******* dK: ", static_cast<half*>(params.dk_ptr), batch_size, seqlen_k, num_heads_k, head_size);
-    // printTensor<half>("******* dV: ", static_cast<half*>(params.dv_ptr), batch_size, seqlen_k, num_heads_k, head_size);
+    // printTensor<half>("******* dK: ", static_cast<half*>(params.dk_ptr), batch_size, seqlen_k, num_heads, head_size);
+    // printTensor<half>("******* dV: ", static_cast<half*>(params.dv_ptr), batch_size, seqlen_k, num_heads, head_size);
     // printTensor<float>("******* softmax_lse: ", static_cast<float*>(params.softmax_lse_ptr), batch_size, seqlen_q, num_heads, 1);
     run_mha_bwd(params, stream);
     // printTensor<half>("******* dQ after fa: ", static_cast<half*>(params.dq_ptr), batch_size, seqlen_q, num_heads, head_size);
-    // printTensor<half>("******* dK after fa: ", static_cast<half*>(params.dk_ptr), batch_size, seqlen_k, num_heads_k, head_size);
-    // printTensor<half>("******* dV after fa: ", static_cast<half*>(params.dv_ptr), batch_size, seqlen_k, num_heads_k, head_size);
+    // printTensor<half>("******* dK after fa: ", static_cast<half*>(params.dk_ptr), batch_size, seqlen_k, num_heads, head_size);
+    // printTensor<half>("******* dV after fa: ", static_cast<half*>(params.dv_ptr), batch_size, seqlen_k, num_heads, head_size);
     // printTensor<float>("******* softmax_d after fa: ", static_cast<float*>(params.dsoftmax_ptr), batch_size, seqlen_q, num_heads, 1);
     
     return true;
@@ -356,8 +357,8 @@ bool flash_attn_varlen_bwd(const void * const dout,
     ASSERT_CHECK(is_bf16 == false);
 
     hipMemset(dq, 0, sizeof(half) * batch_size * max_seqlen_q * num_heads * head_size);
-    hipMemset(dk, 0, sizeof(half) * batch_size * max_seqlen_k * num_heads_k * head_size);
-    hipMemset(dv, 0, sizeof(half) * batch_size * max_seqlen_k * num_heads_k * head_size);
+    hipMemset(dk, 0, sizeof(half) * batch_size * max_seqlen_k * num_heads * head_size);
+    hipMemset(dv, 0, sizeof(half) * batch_size * max_seqlen_k * num_heads * head_size);
 
     FlashBwdGroupedParams params(
       batch_size, max_seqlen_q, max_seqlen_k, num_heads, num_heads_k,
@@ -370,15 +371,26 @@ bool flash_attn_varlen_bwd(const void * const dout,
       dq, // dq is padded
       dk, // dk is padded
       dv, // dv is padded
-      cu_seqlens_q, cu_seqlens_k, std::vector<void*>(),
-      const_cast<void *>(softmax_lse), p_dropout, softmax_scale, is_causal);
+      cu_seqlens_q, cu_seqlens_k, const_cast<void *>(softmax_d),
+      const_cast<void *>(softmax_lse), p_dropout, softmax_scale, is_causal, is_bf16);
 
     if (is_dropout) {
       auto philox_args = at::PhiloxCudaState(seed, offset);
       params.seeds = at::cuda::philox::unpack(philox_args);
     }
 
+    // printTensor<half>("******* out: ", static_cast<half*>(const_cast<void*>(params.bwd_out_ptrs[0])), batch_size, max_seqlen_q, num_heads, head_size);
+    // printTensor<half>("******* dout: ", static_cast<half*>(const_cast<void*>(params.dout_ptrs[0])), batch_size, max_seqlen_q, num_heads, head_size);
+    // printTensor<float>("******* softmax_d: ", static_cast<float*>(params.dsoftmax_ptrs[0]), batch_size, max_seqlen_q, num_heads, 1);
+    // printTensor<half>("******* dQ: ", static_cast<half*>(params.dq_ptrs[0]), batch_size, max_seqlen_q, num_heads, head_size);
+    // printTensor<half>("******* dK: ", static_cast<half*>(params.dk_ptrs[0]), batch_size, max_seqlen_k, num_heads, head_size);
+    // printTensor<half>("******* dV: ", static_cast<half*>(params.dv_ptrs[0]), batch_size, max_seqlen_k, num_heads, head_size);
+    // printTensor<float>("******* softmax_lse: ", static_cast<float*>(const_cast<void*>(params.bwd_softmax_lse_ptrs[0])), batch_size, max_seqlen_q, num_heads, 1);
     run_mha_varlen_bwd(params, stream);
+    // printTensor<half>("******* dQ after fa: ", static_cast<half*>(params.dq_ptrs[0]), batch_size, max_seqlen_q, num_heads, head_size);
+    // printTensor<half>("******* dK after fa: ", static_cast<half*>(params.dk_ptrs[0]), batch_size, max_seqlen_k, num_heads, head_size);
+    // printTensor<half>("******* dV after fa: ", static_cast<half*>(params.dv_ptrs[0]), batch_size, max_seqlen_k, num_heads, head_size);
+    // printTensor<float>("******* softmax_d after fa: ", static_cast<float*>(params.dsoftmax_ptrs[0]), batch_size, max_seqlen_q, num_heads, 1);
     
     return true;
     
