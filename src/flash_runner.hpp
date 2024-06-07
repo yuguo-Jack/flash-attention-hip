@@ -44,10 +44,27 @@ public:
     });
   }
 
+  template <typename FlashParams>
+  void Infer(FlashParams &params, hipStream_t &stream) {
+    // HEADDIM_SWITCH(params.d, [&] {
+      BF16_SWITCH(params.is_bf16, [&] {
+        BOOL_SWITCH(params.is_mnko_padding, kIsPadding, [&] {
+          BOOL_SWITCH(params.is_causal, kIsCausal, [&] {
+            this->template infer_<FlashParams, /*kHeadDim*/128, T, kIsPadding,
+                                kIsCausal>(params, stream);
+          });
+        });
+      });
+    // });
+  }
+
 private:
   template <typename FlashParams, int kHeadDim, typename T, bool kIsPadding,
             bool kIsCausal>
   void run_(FlashParams &params, hipStream_t &stream);
+  template <typename FlashParams, int kHeadDim, typename T, bool kIsPadding,
+            bool kIsCausal>
+  void infer_(FlashParams &params, hipStream_t &stream);
 
   template <typename FlashFwdParams,
             template <typename> typename DeviceGemmTemplate, typename T,

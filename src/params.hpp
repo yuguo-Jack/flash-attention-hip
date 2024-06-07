@@ -270,6 +270,20 @@ struct FlashBwdBatchedParams : public BatchedParams {
   std::vector<Index> dv_strides;
 };
 
+struct FlashInferBatchedParams : public BatchedParams {
+  explicit FlashInferBatchedParams(
+      const Index b, const Index max_seqlen_q, const Index max_seqlen_kv,
+      const Index h_q, const Index h_kv, const Index d, void * q,
+      void * k, void * v, void * out, 
+      const float softmax_scale, const bool is_causal, const bool is_bf16, 
+      void * softmax_lse)
+      : BatchedParams(b, max_seqlen_q, max_seqlen_kv, h_q, h_kv, d, q, k, v,
+                      out, softmax_lse, max_seqlen_q * h_q * d, max_seqlen_kv * h_kv * d, max_seqlen_q * h_q * d,
+                      h_q * d, h_kv * d, h_q * d, d, d,
+                      d, max_seqlen_q * h_q, 0.0, softmax_scale, is_causal, is_bf16) {
+  }
+};
+
 // Common Grouped Arguments
 struct GroupedParams : public BaseParams {
   explicit GroupedParams(const Index b, const Index max_seqlen_q,

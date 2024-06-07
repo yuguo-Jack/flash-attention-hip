@@ -805,6 +805,17 @@ struct BlockwiseGemmXdlops_v2
         return make_tuple(0, waveId_n, xdlops_b_idx[I1], KPack * xdlops_b_idx[I0]);
     }
 
+    __device__ static auto CalculateBThreadOriginDataIndexWithStride()
+    {
+        const auto wave_idx = GetWaveIdx();
+
+        const auto waveId_n = wave_idx[I1];
+
+        const auto xdlops_b_idx = xdlops_gemm.CalculateBThreadOriginDataIndex();
+
+        return make_tuple(0, waveId_n, xdlops_b_idx[I1], xdlops_b_idx[I0]);
+    }
+
     template <index_t m0, index_t n0, index_t xdlops_i, index_t blk_i>
     __device__ static auto
         CalculateCThreadOriginDataIndex(Number<m0>, Number<n0>, Number<xdlops_i>, Number<blk_i>)
@@ -852,8 +863,9 @@ struct BlockwiseGemmXdlops_v2
     using Tuple4 = decltype(CalculateAThreadOriginDataIndex());
 
     __host__ __device__ BlockwiseGemmXdlops_v2(Tuple4 a_origin = CalculateAThreadOriginDataIndex(),
-                                               Tuple4 b_origin = CalculateBThreadOriginDataIndex())
-        : a_thread_copy_(a_origin), b_thread_copy_(b_origin), kme_b_thread_copy_(b_origin)
+                                               Tuple4 b_origin = CalculateBThreadOriginDataIndex(),
+                                               Tuple4 b_origin_with_stride = CalculateBThreadOriginDataIndexWithStride())
+        : a_thread_copy_(a_origin), b_thread_copy_(b_origin), kme_b_thread_copy_(b_origin), b_thread_copy_with_stride_(b_origin_with_stride)
     {
         static_assert(AMmaTileDesc::IsKnownAtCompileTime() && BMmaTileDesc::IsKnownAtCompileTime(),
                       "wrong! Desc should be known at compile-time");
@@ -866,7 +878,7 @@ struct BlockwiseGemmXdlops_v2
     }
 
     __host__ __device__ BlockwiseGemmXdlops_v2(const BlockwiseGemmXdlops_v2& other)
-        : a_thread_copy_(other.a_origin), b_thread_copy_(other.b_origin), kme_b_thread_copy_(other.b_origin)
+        : a_thread_copy_(other.a_origin), b_thread_copy_(other.b_origin), kme_b_thread_copy_(other.b_origin), b_thread_copy_with_stride_(other.b_origin_with_stride)
     {
     }
 
@@ -1177,6 +1189,59 @@ struct BlockwiseGemmXdlops_v2
       });
   }
 
+    template <typename ABlockBuffer, typename BBlockBuffer, typename CThreadBuffer>
+    __device__ void RunWithStride(const ABlockBuffer& a_block_buf,
+                        const BBlockBuffer& b_block_buf,
+                        CThreadBuffer& c_thread_buf) const
+    {
+        auto a_thread_buf = make_static_buffer<AddressSpaceEnum::Vgpr, FloatAB>(
+            a_thread_desc_.GetElementSpaceSize());
+        auto b_thread_buf = make_static_buffer<AddressSpaceEnum::Vgpr, FloatAB>(
+            b_thread_desc_.GetElementSpaceSize());
+
+        static_for<0, KPerThread / KPack, 1>{}([&](auto k) { // k=0,1,2 instead of k=0,kpack*1, ...
+            static_for<0, MRepeat, 1>{}([&](auto m0) {
+                // read A
+                a_thread_copy_.Run(a_block_desc_m0_m1_m2_k,
+                                   make_tuple(m0, I0, I0, Number<k * AMmaKStride>{}),
+                                   a_block_buf,
+                                   a_thread_desc_,
+                                   make_tuple(I0, I0, I0, I0),
+                                   a_thread_buf);
+
+                static_for<0, NRepeat, 1>{}([&](auto n0) {
+                    // read B
+                    b_thread_copy_with_stride_.RunWithStride(b_block_desc_n0_n1_n2_k,
+                                       make_tuple(n0, I0, I0, Number<k * BMmaKStride>{}),
+                                       b_block_buf,
+                                       b_thread_desc_,
+                                       make_tuple(I0, I0, I0, I0),
+                                       b_thread_buf);
+                    vector_type<FloatAB, KPack> a_thread_vec;
+                    vector_type<FloatAB, KPack> b_thread_vec;
+
+                    static_for<0, KPack, 1>{}([&](auto i) {
+                        a_thread_vec.template AsType<FloatAB>()(i) = a_thread_buf
+                            [Number<a_thread_desc_.CalculateOffset(make_tuple(0, 0, 0, i))>{}];
+                        b_thread_vec.template AsType<FloatAB>()(i) = b_thread_buf
+                            [Number<b_thread_desc_.CalculateOffset(make_tuple(0, 0, 0, i))>{}];
+                    });
+
+                    using mfma_input_type =
+                        typename vector_type<FloatAB, xdlops_gemm.K1PerXdlops>::type;
+
+                    constexpr index_t c_offset =
+                        c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
+
+                    xdlops_gemm.template Run(
+                        a_thread_vec.template AsType<mfma_input_type>(),
+                        b_thread_vec.template AsType<mfma_input_type>(),
+                        c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
+                });
+        });
+      });
+  }
+
 public:
   // A[M0, M1, M2, KPack]
   static constexpr auto a_thread_desc_ =
@@ -1220,9 +1285,20 @@ public:
         3,
         B_K1,
         B_K1 * NPerXDL>;
+
+    using BThreadCopyWithStride = ThreadwiseTensorSliceTransfer_v4<FloatAB,
+                                                         FloatAB,
+                                                         decltype(b_block_desc_n0_n1_n2_k),
+                                                         decltype(b_thread_desc_),
+                                                         Sequence<1, 1, 1, KPack>,
+                                                         Sequence<0, 1, 2, 3>,
+                                                         3,
+                                                         B_K1,
+                                                         4>; // stride
     AThreadCopy a_thread_copy_;
     BThreadCopy b_thread_copy_;
     BThreadCopy_kme kme_b_thread_copy_;
+    BThreadCopyWithStride b_thread_copy_with_stride_;
 };
 
 } // namespace ck

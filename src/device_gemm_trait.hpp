@@ -33,6 +33,7 @@
 
 // batched
 #include "ck/tensor_operation/gpu/device/impl/device_batched_mha_fwd_xdl_cshuffle_v2.hpp"
+#include "ck/tensor_operation/gpu/device/impl/device_batched_mha_infer_xdl_cshuffle_v2.hpp"
 
 #include "ck/tensor_operation/gpu/device/impl/device_batched_mha_bwd_xdl_cshuffle_qloop_light_v1.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_batched_mha_bwd_xdl_cshuffle_qloop_light_v2.hpp"
@@ -61,6 +62,8 @@ static constexpr auto kGemmSpecPadding = GemmSpec::MNKOPadding;
 static constexpr auto kMaskingSpecDefault = MaskingSpec::MaskDisabled;
 static constexpr auto kMaskingSpecCausal =
     MaskingSpec::MaskUpperTriangleFromTopLeft;
+static constexpr auto kMaskingSpecCausalInfer =
+    MaskingSpec::MaskUpperTriangleFromTopLeftWithPrefix;
 
 template <typename InputDataType_, GemmSpec kGemmSpec_,
           MaskingSpec kMaskingSpec_, bool kIsDeterministic_>

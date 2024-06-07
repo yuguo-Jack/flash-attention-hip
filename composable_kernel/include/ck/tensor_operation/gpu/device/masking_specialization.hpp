@@ -11,7 +11,8 @@ enum struct MaskingSpecialization
 {
     MaskDisabled,
     MaskUpperTriangleFromTopLeft,
-    MaskUpperTriangleFromBottomRight
+    MaskUpperTriangleFromBottomRight,
+    MaskUpperTriangleFromTopLeftWithPrefix
 };
 
 inline std::string getMaskingSpecializationString(const MaskingSpecialization& s)
@@ -22,6 +23,8 @@ inline std::string getMaskingSpecializationString(const MaskingSpecialization& s
     case MaskingSpecialization::MaskUpperTriangleFromTopLeft: return "MaskUpperTriangleFromTopLeft";
     case MaskingSpecialization::MaskUpperTriangleFromBottomRight:
         return "MaskUpperTriangleFromBottomRight";
+    case MaskingSpecialization::MaskUpperTriangleFromTopLeftWithPrefix:
+        return "MaskUpperTriangleFromTopLeftWithPrefix";
     default: return "Unrecognized specialization!";
     }
 }
@@ -49,6 +52,26 @@ struct MaskUpperTriangleFromTopLeftPredicate
     {
         return operator()(m + m_tile - 1, n);
     }
+};
+
+struct MaskUpperTriangleFromTopLeftWithPrefixPredicate {
+    
+    MaskUpperTriangleFromTopLeftWithPrefixPredicate() : MRaw_(0) {}
+    __host__ __device__ void SetMRaw(const index_t MRaw)
+    {
+        MRaw_ = MRaw;
+    }
+    
+    __host__ __device__ constexpr bool operator()(index_t m, index_t n) const { return n > m && n < MRaw_; }
+
+    __host__ __device__ constexpr bool
+    IsTileSkippable(index_t m, index_t n, index_t m_tile, index_t n_tile) const
+    {
+        return (n > (m+m_tile-1)) && ((n+n_tile) < MRaw_);
+    }
+
+    private:
+    index_t MRaw_;
 };
 
 // eg: m = 3, n = 5 => offset = 2
@@ -93,6 +116,11 @@ struct C0MatrixMask_impl
         {
             if(NRaw > MRaw)
                 predicate_.SetDiagonalOffset(NRaw - MRaw);
+        }
+        if constexpr(std::is_same<MaskOutPredicate,
+                                  MaskUpperTriangleFromTopLeftWithPrefixPredicate>::value)
+        {
+            predicate_.SetMRaw(MRaw);
         }
     }
 

@@ -136,5 +136,35 @@ public:
       std::cout << "time elpase is " << avg_time << " ms" << std::endl;
     }
   }
+
+  // constructor for batched gemm
+  explicit DeviceGemmInvoker(FlashInferBatchedParams &params,
+                             hipStream_t &stream) {
+    auto gemm_ptr = std::make_unique<Gemm>();
+    auto invoker_ptr = gemm_ptr->MakeInvokerPointer();
+    auto argument_ptr = gemm_ptr->MakeArgumentPointer(
+        params.q_ptr, params.k_ptr, params.v_ptr, params.out_ptr, 
+        nullptr, nullptr, params.q_lengths,
+        params.q_strides, params.k_lengths, params.k_strides, params.v_lengths,
+        params.v_strides, params.out_lengths, params.out_strides,
+        {}, {}, {}, {},
+        typename DeviceGemmTraits::QElementOp{},
+        typename DeviceGemmTraits::KElementOp{},
+        typename DeviceGemmTraits::Acc0ElementOp{params.softmax_scale},
+        typename DeviceGemmTraits::VElementOp{},
+        typename DeviceGemmTraits::OutElementOp{});
+
+    if (!gemm_ptr->IsSupportedArgument(argument_ptr.get())) {
+      throw std::runtime_error(gemm_ptr->GetTypeString() +
+                               " does not support this problem");
+    }
+    auto time_kernel = get_env_("FLASH_ATTENTION_INTERNAL_ENABLE_TIME_KERNEL");
+    auto avg_time =
+        invoker_ptr->Run(argument_ptr.get(), StreamConfig{stream, time_kernel});
+
+    if (time_kernel) {
+      std::cout << "time elpase is " << avg_time << " ms" << std::endl;
+    }
+  }
 };
 } // namespace fwd_device_gemm

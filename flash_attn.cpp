@@ -114,6 +114,11 @@ void run_mha_fwd(FlashFwdBatchedParams &params, hipStream_t stream) {
     flash_runner.Run(params, stream);
 }
 
+void run_mha_fwd_infer(FlashInferBatchedParams &params, hipStream_t stream) {
+    FlashRunner flash_runner;
+    flash_runner.Infer(params, stream);
+}
+
 void run_mha_varlen_fwd(FlashFwdGroupedParams &params, hipStream_t stream) {
     FlashRunner flash_runner;
     flash_runner.Run(params, stream);
@@ -159,24 +164,34 @@ bool flash_attn_fwd(const void * const q,
                     uint64_t seed,
                     uint64_t offset,
                     const void * const attn_mask,
-                    const int64_t * const mask_dims) {
+                    const int64_t * const mask_dims,
+                    const bool is_infer) {
     FLASHATTNLIB_BEGIN_FUNC
     const bool is_dropout = p_dropout > 0.0;
     CHECK_FWD_EXECTUABLE(seqlen_q, seqlen_k)
 
-    FlashFwdBatchedParams params(batch_size, seqlen_q, seqlen_k, num_heads,
-                                num_heads_k, head_size, const_cast<void *>(q), const_cast<void *>(k),
-                                const_cast<void *>(v), out, softmax_ptr, softmax_lse_ptr, 
-                                p_dropout, softmax_scale, is_causal, return_softmax, is_bf16);
+    if (is_infer) {
+        ASSERT_CHECK(head_size == 128);
+        FlashInferBatchedParams params(batch_size, seqlen_q, seqlen_k, num_heads,
+                                      num_heads_k, head_size, const_cast<void *>(q), const_cast<void *>(k),
+                                      const_cast<void *>(v), out, softmax_scale, is_causal, is_bf16, softmax_lse_ptr);
 
-    if (is_dropout) {
-        auto philox_args = at::PhiloxCudaState(seed, offset);
-        params.seeds = at::cuda::philox::unpack(philox_args);
-        auto rng_state_ptr = reinterpret_cast<uint64_t *>(rng_state);
-        std::tie(rng_state_ptr[0], rng_state_ptr[1]) = params.seeds;
+        run_mha_fwd_infer(params, stream);
+    } else {
+        FlashFwdBatchedParams params(batch_size, seqlen_q, seqlen_k, num_heads,
+                                    num_heads_k, head_size, const_cast<void *>(q), const_cast<void *>(k),
+                                    const_cast<void *>(v), out, softmax_ptr, softmax_lse_ptr, 
+                                    p_dropout, softmax_scale, is_causal, return_softmax, is_bf16);
+    
+        if (is_dropout) {
+            auto philox_args = at::PhiloxCudaState(seed, offset);
+            params.seeds = at::cuda::philox::unpack(philox_args);
+            auto rng_state_ptr = reinterpret_cast<uint64_t *>(rng_state);
+            std::tie(rng_state_ptr[0], rng_state_ptr[1]) = params.seeds;
+        }
+
+        run_mha_fwd(params, stream);
     }
-
-    run_mha_fwd(params, stream);
     
     return true;
 
