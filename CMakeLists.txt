@@ -38,6 +38,8 @@ target_compile_options(flashattn PRIVATE $<$<COMPILE_LANGUAGE:CXX>:
   -D__HIP_PLATFORM_HCC__=1
   --offload-arch=gfx928
   -D__gfx940__
+  -mllvm 
+  -enable-num-vgprs-512=true
   >)
 
 INSTALL(TARGETS flashattn
