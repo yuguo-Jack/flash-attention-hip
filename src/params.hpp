@@ -279,8 +279,8 @@ struct FlashInferBatchedParams : public BatchedParams {
       void * softmax_lse)
       : BatchedParams(b, max_seqlen_q, max_seqlen_kv, h_q, h_kv, d, q, k, v,
                       out, softmax_lse, max_seqlen_q * h_q * d, max_seqlen_kv * h_kv * d, max_seqlen_q * h_q * d,
-                      h_q * d, h_kv * d, h_q * d, d, d,
-                      d, max_seqlen_q * h_q, 0.0, softmax_scale, is_causal, is_bf16) {
+                      d, d, d, max_seqlen_q * d, max_seqlen_kv * d,
+                      max_seqlen_q * d, max_seqlen_q * h_q, 0.0, softmax_scale, is_causal, is_bf16) {
   }
 };
 
